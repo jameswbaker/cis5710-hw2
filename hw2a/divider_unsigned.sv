@@ -29,14 +29,16 @@ module divider_unsigned (
     output wire [31:0] o_remainder,
     output wire [31:0] o_quotient
 );    
-    wire [1023:0] divd, rem, quot;
+
+    // (32 * 32) + 32 wires
+    wire [1055:0] divd, rem, quot;
 
     assign divd[31:0] = i_dividend;
     assign rem[31:0] = 32'b0;
     assign quot[31:0] = 32'b0;
 
     genvar i;
-    for (i = 0; i < 1024 - 32; i = i+32) begin
+    for (i = 0; i < 1024; i = i+32) begin
         divu_1iter d1iter(
             .i_dividend(divd[i+31:i]), 
             .i_divisor(i_divisor), 
@@ -47,8 +49,8 @@ module divider_unsigned (
             .o_quotient(quot[i+63:i+32])
         );
     end
-    assign o_remainder = rem[1023:992];
-    assign o_quotient = quot[1023:992];
+    assign o_remainder = rem[1055:1024];
+    assign o_quotient = quot[1055:1024];
 
 endmodule
 
@@ -62,7 +64,7 @@ module divu_1iter (
     output wire [31:0] o_remainder,
     output wire [31:0] o_quotient
 );
-  /*
+    /*
     for (int i = 0; i < 32; i++) {
         remainder = (remainder << 1) | ((dividend >> 31) & 0x1);
         if (remainder < divisor) {
