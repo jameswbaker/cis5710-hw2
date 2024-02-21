@@ -10,7 +10,7 @@
 `include "../hw2b/cla.sv"
 
 module RegFile (
-    input logic [4:0] rd,
+    input logic [4:0] rd,  // 5 bits -> 2^5 = 32 options
     input logic [`REG_SIZE] rd_data,
     input logic [4:0] rs1,
     output logic [`REG_SIZE] rs1_data,
@@ -24,8 +24,35 @@ module RegFile (
   localparam int NumRegs = 32;
   logic [`REG_SIZE] regs[NumRegs];
 
-  // TODO: your code here
+  // inputs
+  // rd: destination to write
+  // rd_data: RDestValue (value to write)
+  // rs1: reg. source to read
+  // rs2: reg. source to read
+  // clk: thing that goes on and off regularly, only when clk is on 1 do certain things happen
+  // we: write enable: 1 means write to memory 0 means don't
+  // rst: reset
 
+  // outputs
+  // rs1_data: RSrc1Val to output
+  // rs2_data: RSrc2Val to output
+
+  // Reads
+  assign rs1_data = regs[rs1];  // read from rs1
+  assign rs2_data = regs[rs2];  // read from rs2
+  assign regs[0]  = 32'd0;  // x0 is hardwired to 0
+
+  // Writes
+  // what does always_ff do? It's a clocked always block, meaning it only runs when the clock is 1
+  always_ff @(posedge clk) begin
+    if (rst) begin
+      for (int i = 1; i < NumRegs; i++) begin
+        regs[i] <= 32'd0;  // Reset all registers to 0, except for reg[0]
+      end
+    end else if (we && rd != 5'd0) begin
+      regs[rd] <= rd_data;
+    end
+  end
 endmodule
 
 module DatapathSingleCycle (
@@ -68,7 +95,13 @@ module DatapathSingleCycle (
 
   // J - unconditional jumps
   wire [20:0] imm_j;
-  assign {imm_j[20], imm_j[10:1], imm_j[11], imm_j[19:12], imm_j[0]} = {insn_from_imem[31:12], 1'b0};
+  assign {imm_j[20], imm_j[10:1], imm_j[11], imm_j[19:12], imm_j[0]} = {
+    insn_from_imem[31:12], 1'b0
+  };
+
+  // U - setup for U type instructions
+  wire [19:0] imm_u;
+  assign imm_u = insn_from_imem[31:12];
 
   wire [`REG_SIZE] imm_i_sext = {{20{imm_i[11]}}, imm_i[11:0]};
   wire [`REG_SIZE] imm_s_sext = {{20{imm_s[11]}}, imm_s[11:0]};
@@ -188,12 +221,36 @@ module DatapathSingleCycle (
 
   logic illegal_insn;
 
+  wire [31:0] rd_data = {imm_u, 12'b0};
+  RegFile rf (
+      .rd(imm_rd),
+      .rd_data(rd_data),
+      .rs1(5'b0),
+      .rs1_data(),
+      .rs2(5'b0),
+      .rs2_data(),
+
+      .clk(clk),
+      .we (1),
+      .rst(rst)
+  );
+
   always_comb begin
     illegal_insn = 1'b0;
+
 
     case (insn_opcode)
       OpLui: begin
         // TODO: start here by implementing lui
+
+        // LUI: Load Upper Immediate
+        // get instruction info
+        // set WE to 1
+        // take rd(5) and use as input to rd in regfile
+        // take imm(20) and left shift by 12
+        // don't do anything with opcode
+
+
       end
       default: begin
         illegal_insn = 1'b1;
@@ -305,16 +362,16 @@ module RiscvProcessor (
   MemorySingleCycle #(
       .NUM_WORDS(8192)
   ) mem (
-      .rst      (rst),
-      .clock_mem (clock_mem),
+      .rst                (rst),
+      .clock_mem          (clock_mem),
       // imem is read-only
-      .pc_to_imem(pc_to_imem),
-      .insn_from_imem(insn_from_imem),
+      .pc_to_imem         (pc_to_imem),
+      .insn_from_imem     (insn_from_imem),
       // dmem is read-write
-      .addr_to_dmem(mem_data_addr),
+      .addr_to_dmem       (mem_data_addr),
       .load_data_from_dmem(mem_data_loaded_value),
       .store_data_to_dmem (mem_data_to_write),
-      .store_we_to_dmem  (mem_data_we)
+      .store_we_to_dmem   (mem_data_we)
   );
 
   DatapathSingleCycle datapath (
