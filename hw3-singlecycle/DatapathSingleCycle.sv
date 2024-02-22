@@ -221,28 +221,28 @@ module DatapathSingleCycle (
 
   logic illegal_insn;
 
-  wire [31:0] rd_data = {imm_u, 12'b0};
+  logic [4:0] rd, rs1, rs2;
+  logic [31:0] rd_data, rs1_data, rs2_data;
+  logic we;
+  
   RegFile rf (
-      .rd(imm_rd),
+      .rd(rd),
       .rd_data(rd_data),
-      .rs1(5'b0),
-      .rs1_data(),
-      .rs2(5'b0),
-      .rs2_data(),
+      .rs1(rs1),
+      .rs1_data(rs1_data),
+      .rs2(rs2),
+      .rs2_data(rs2_data),
 
       .clk(clk),
-      .we (1),
+      .we (we),
       .rst(rst)
   );
 
   always_comb begin
     illegal_insn = 1'b0;
 
-
     case (insn_opcode)
       OpLui: begin
-        // TODO: start here by implementing lui
-
         // LUI: Load Upper Immediate
         // get instruction info
         // set WE to 1
@@ -250,7 +250,214 @@ module DatapathSingleCycle (
         // take imm(20) and left shift by 12
         // don't do anything with opcode
 
+        rd = insn_rd;
+        rd_data = {imm_u, 12'b0};
+        we = 1;
 
+        // increment PC
+        assign pcNext = pcCurrent + 32'd4;
+      end
+      OpRegImm: begin
+        case(insn_from_imem[14:12])
+          3'b000: begin
+            // ADDI: Add Immediate
+
+            rd = insn_rd;
+            rs1 = insn_rs1;
+            rd_data = rs1_data + imm_i_sext;
+            we = 1;
+          end
+          3'b010: begin
+            // SLTI: Set Less Than Immediate
+
+            rd = insn_rd;
+            rs1 = insn_rs1;
+            rd_data = rs1_data < imm_i_sext ? 1 : 0;
+            we = 1;
+          end
+          3'b011: begin
+            // SLTIU: Set Less Than Immediate Unsigned
+
+            rd = insn_rd;
+            rs1 = insn_rs1;
+
+            rd_data = rs1_data < imm_i_sext ? 1 : 0;
+            we = 1;
+          end
+          3'b100: begin
+            // XORI: XOR Immediate
+
+            rd = insn_rd;
+            rs1 = insn_rs1;
+            rd_data = rs1_data ^ imm_i_sext;
+            we = 1;
+          end
+          3'b110: begin
+            // ORI: OR Immediate
+
+            rd = insn_rd;
+            rs1 = insn_rs1;
+            rd_data = rs1_data | imm_i_sext;
+            we = 1;
+          end
+          3'b111: begin
+            // ANDI: AND Immediate
+
+            rd = insn_rd;
+            rs1 = insn_rs1;
+            rd_data = rs1_data & imm_i_sext;
+            we = 1;
+          end
+
+          3'b001: begin
+            // SLLI: Shift Left Logical Immediate
+
+            rd = insn_rd;
+            rs1 = insn_rs1;
+            rd_data = rs1_data << imm_i[4:0];
+            we = 1;
+          end
+          3'b101: begin
+            case(insn_from_imem[31:25]) 
+              7'b0000000: begin
+                // SRLI: Shift Right Logical Immediate
+
+                rd = insn_rd;
+                rs1 = insn_rs1;
+                rd_data = rs1_data >> imm_i[4:0];
+                we = 1;
+              end
+              7'b0100000: begin
+                // SRAI: Shift Right Arithmetic Immediate
+
+                rd = insn_rd;
+                rs1 = insn_rs1;
+                rd_data = rs1_data >>> imm_i[4:0];
+                we = 1;
+              end
+              default: begin
+                // do nothing otherwise
+              end
+            endcase
+          end
+
+        endcase
+        // increment PC
+        assign pcNext = pcCurrent + 32'd4;
+      end
+      OpRegReg: begin
+        case(insn_from_imem[14:12])
+          3'b000: begin
+            case(insn_from_imem[31:25])
+              7'd0: begin
+                // ADD: Add
+
+                rd = insn_rd;
+                rs1 = insn_rs1;
+                rs2 = insn_rs2;
+                rd_data = rs1_data + rs2_data;
+                we = 1;
+              end
+              7'b0100000: begin
+                // SUB: Subtract
+
+                rd = insn_rd;
+                rs1 = insn_rs1;
+                rs2 = insn_rs2;
+                rd_data = rs1_data - rs2_data;
+                we = 1;
+              end
+              default: begin
+                // do nothing otherwise
+              end
+            endcase
+          end
+          3'b001: begin
+            if (insn_from_imem[31:25] == 7'd0) begin
+              rd = insn_rd;
+              rs1 = insn_rs1;
+              rs2 = insn_rs2;
+              rd_data = rs1_data << rs2_data[4:0];
+              we = 1;
+            end
+          end
+          3'b010: begin
+            if (insn_from_imem[31:25] == 7'd0) begin
+                // SLT: Set Less Than
+
+                // Possible Issue: Not sure if this signed is correct
+
+                rd = insn_rd;
+                rs1 = insn_rs1;
+                rs2 = insn_rs2;
+                rd_data = rs1_data < rs2_data ? 1 : 0;
+                we = 1;
+              end
+          end
+          3'b011: begin
+            if (insn_from_imem[31:25] == 7'd0) begin
+                // SLTU: Set Less Than Unsigned
+
+                rd = insn_rd;
+                rs1 = insn_rs1;
+                rs2 = insn_rs2;
+                rd_data = rs1_data < rs2_data ? 1 : 0;
+                we = 1;
+            end
+          end
+          3'b100: begin
+            // XOR: XOR
+
+            rd = insn_rd;
+            rs1 = insn_rs1;
+            rs2 = insn_rs2;
+            rd_data = rs1_data ^ rs2_data;
+            we = 1;
+          end
+          3'b101: begin
+            case(insn_from_imem[31:25])
+              7'd0: begin
+                // SRL: Shift Right Logical
+
+                rd = insn_rd;
+                rs1 = insn_rs1;
+                rs2 = insn_rs2;
+                rd_data = rs1_data >> rs2_data[4:0];
+                we = 1;
+              end
+              7'b0100000: begin
+                // SRA: Shift Right Arithmetic
+
+                rd = insn_rd;
+                rs1 = insn_rs1;
+                rs2 = insn_rs2;
+                rd_data = rs1_data >>> rs2_data[4:0];
+                we = 1;
+              end
+              default: begin
+                // do nothing otherwise
+              end
+            endcase
+          end
+          3'b110: begin
+            // OR: OR
+
+            rd = insn_rd;
+            rs1 = insn_rs1;
+            rs2 = insn_rs2;
+            rd_data = rs1_data | rs2_data;
+            we = 1;
+          end
+          3'b111: begin
+            // AND: AND
+
+            rd = insn_rd;
+            rs1 = insn_rs1;
+            rs2 = insn_rs2;
+            rd_data = rs1_data & rs2_data;
+            we = 1;
+          end
+        endcase
       end
       default: begin
         illegal_insn = 1'b1;
