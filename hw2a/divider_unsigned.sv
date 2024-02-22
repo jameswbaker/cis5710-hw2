@@ -64,18 +64,6 @@ module divu_1iter (
     output wire [31:0] o_remainder,
     output wire [31:0] o_quotient
 );
-    /*
-    for (int i = 0; i < 32; i++) {
-        remainder = (remainder << 1) | ((dividend >> 31) & 0x1);
-        if (remainder < divisor) {
-            quotient = (quotient << 1);
-        } else {
-            quotient = (quotient << 1) | 0x1;
-            remainder = remainder - divisor;
-        }
-        dividend = dividend << 1;
-    }
-    */
 
     wire [31:0] rem_s, rem_s2, divd_msb, quot_s;
 

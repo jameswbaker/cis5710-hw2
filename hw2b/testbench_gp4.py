@@ -123,3 +123,4 @@ async def test_propagate_and_propagate(dut):
     assert 0x7 == dut.cout.value
     pass
 
+

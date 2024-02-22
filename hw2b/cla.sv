@@ -73,33 +73,6 @@ module gp8(input wire [7:0] gin, pin,
    assign pout = p74 & p30;
    assign cout = { c75, c4, c31 };
 
-   // bottom_4_gout = G3-0
-   // bottom_4_pout = P3-0
-   // bottom_3_cout = C2, C1, C0
-
-   // top_4_gout = G7-4
-   // top_4_pout = P7-4
-
-   // wire c3 = gin[2] | (pin[2] & bottom_3_cout[2]);
-   // wire c4 = bottom_4_gout | (bottom_4_pout & cin);
-   // wire c5 = gin[4] | (pin[4] & c4);
-   
-   // wire g54 = gin[5] | (pin[5] & gin[4]);
-   // wire p54 = pin[5] & pin[4];
-
-   // wire g76 = gin[7] | (pin[7] & gin[6]);
-   // wire p76 = pin[7] & pin[6];
-
-   // wire g50 = g54 | (p54 & bottom_4_gout);
-   // wire p50 = p54 & bottom_4_pout;
-
-   // wire c6 = g50 | (p50 & cin);
-
-   // assign gout = g76 | (p76 & g50);
-   // assign pout = p76 & p50;
-   // assign cout[2:0] = bottom_3_cout;
-   // assign cout[6:3] = { c6, c5, c4, c3 };
-
 endmodule
 
 module cla
@@ -109,18 +82,6 @@ module cla
 
    wire [31:0] g = a & b;
    wire [31:0] p = a | b;
-
-   // wire g70, p70;
-   // wire [7:0] c71;
-   // gp8 get70 (
-   //    .gin(g[7:0]),
-   //    .pin(p[7:0]),
-   //    .cin(cin),
-   //    .gout(g70),
-   //    .pout(p70),
-   //    .cout(c71[6:1])
-   // )
-   // c8 = g70 | (p70 & c0)
 
    wire [3:0] gr;
    wire [3:0] pr;
