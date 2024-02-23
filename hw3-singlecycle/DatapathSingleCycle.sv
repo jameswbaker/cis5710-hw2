@@ -230,12 +230,12 @@ module DatapathSingleCycle (
   logic [31:0] cla_b;
 
   cla c (
-    .a(cla_a),
-    .b(cla_b),
-    .cin(1'b0),
-    .sum(rd_data_inter)
+      .a  (cla_a),
+      .b  (cla_b),
+      .cin(1'b0),
+      .sum(rd_data_inter)
   );
-  
+
   RegFile rf (
       .rd(rd),
       .rd_data(rd_data),
@@ -251,6 +251,7 @@ module DatapathSingleCycle (
 
   always_comb begin
     illegal_insn = 1'b0;
+    halt = 0;
 
     case (insn_opcode)
       OpLui: begin
@@ -269,7 +270,7 @@ module DatapathSingleCycle (
         assign pcNext = pcCurrent + 32'd4;
       end
       OpRegImm: begin
-        case(insn_from_imem[14:12])
+        case (insn_from_imem[14:12])
           3'b000: begin
             // ADDI: Add Immediate
 
@@ -287,7 +288,7 @@ module DatapathSingleCycle (
 
             rd = insn_rd;
             rs1 = insn_rs1;
-            rd_data = rs1_data < $signed(imm_i_sext) ? 1 : 0;
+            rd_data = $signed(rs1_data) < $signed(imm_i_sext) ? 1 : 0;  // TODO: sign rs1_data?
             we = 1;
           end
           3'b011: begin
@@ -296,7 +297,7 @@ module DatapathSingleCycle (
             rd = insn_rd;
             rs1 = insn_rs1;
 
-            rd_data = rs1_data < $unsigned(imm_i_sext) ? 1 : 0;
+            rd_data = $unsigned(rs1_data) < $unsigned(imm_i_sext) ? 1 : 0;
             we = 1;
           end
           3'b100: begin
@@ -333,7 +334,7 @@ module DatapathSingleCycle (
             we = 1;
           end
           3'b101: begin
-            case(insn_from_imem[31:25]) 
+            case (insn_from_imem[31:25])
               7'b0000000: begin
                 // SRLI: Shift Right Logical Immediate
 
@@ -347,7 +348,7 @@ module DatapathSingleCycle (
 
                 rd = insn_rd;
                 rs1 = insn_rs1;
-                rd_data = rs1_data >>> imm_i[4:0];
+                rd_data = $signed(rs1_data) >>> imm_i[4:0];
                 we = 1;
               end
               default: begin
@@ -361,9 +362,9 @@ module DatapathSingleCycle (
         assign pcNext = pcCurrent + 32'd4;
       end
       OpRegReg: begin
-        case(insn_from_imem[14:12])
+        case (insn_from_imem[14:12])
           3'b000: begin
-            case(insn_from_imem[31:25])
+            case (insn_from_imem[31:25])
               7'd0: begin
                 // ADD: Add
 
@@ -383,9 +384,9 @@ module DatapathSingleCycle (
                 rd = insn_rd;
                 rs1 = insn_rs1;
                 rs2 = insn_rs2;
-                
+
                 cla_a = rs1_data;
-                cla_b = -rs2_data;
+                cla_b = -rs2_data;  // TODO: CHECK IF SUB FAILS, maybe sign?
                 rd_data = rd_data_inter;
 
                 we = 1;
@@ -397,6 +398,7 @@ module DatapathSingleCycle (
           end
           3'b001: begin
             if (insn_from_imem[31:25] == 7'd0) begin
+              // SLL: shift left unsigned
               rd = insn_rd;
               rs1 = insn_rs1;
               rs2 = insn_rs2;
@@ -406,24 +408,25 @@ module DatapathSingleCycle (
           end
           3'b010: begin
             if (insn_from_imem[31:25] == 7'd0) begin
-                // SLT: Set Less Than
+              // SLT: Set Less Than
 
-                rd = insn_rd;
-                rs1 = insn_rs1;
-                rs2 = insn_rs2;
-                rd_data = rs1_data < $signed(rs2_data) ? 1 : 0;
-                we = 1;
-              end
+              rd = insn_rd;
+              rs1 = insn_rs1;
+              rs2 = insn_rs2;
+              rd_data = $signed(rs1_data) < $signed(rs2_data) ? 1 : 0;  // TODO: CHECK (signed?)
+              we = 1;
+            end
           end
           3'b011: begin
             if (insn_from_imem[31:25] == 7'd0) begin
-                // SLTU: Set Less Than Unsigned
+              // SLTU: Set Less Than Unsigned
 
-                rd = insn_rd;
-                rs1 = insn_rs1;
-                rs2 = insn_rs2;
-                rd_data = rs1_data < $unsigned(rs2_data)  ? 1 : 0;
-                we = 1;
+              rd = insn_rd;
+              rs1 = insn_rs1;
+              rs2 = insn_rs2;
+              rd_data = $unsigned(rs1_data) < $unsigned(rs2_data) ? 1 :
+                  0;  // TODO: CHECK (unsigned?)
+              we = 1;
             end
           end
           3'b100: begin
@@ -436,7 +439,7 @@ module DatapathSingleCycle (
             we = 1;
           end
           3'b101: begin
-            case(insn_from_imem[31:25])
+            case (insn_from_imem[31:25])
               7'd0: begin
                 // SRL: Shift Right Logical
 
@@ -452,7 +455,7 @@ module DatapathSingleCycle (
                 rd = insn_rd;
                 rs1 = insn_rs1;
                 rs2 = insn_rs2;
-                rd_data = rs1_data >>> rs2_data[4:0];
+                rd_data = $signed(rs1_data) >>> rs2_data[4:0];
                 we = 1;
               end
               default: begin
@@ -483,11 +486,13 @@ module DatapathSingleCycle (
         assign pcNext = pcCurrent + 32'd4;
       end
       OpBranch: begin
-        case(insn_from_imem[14:12])
+        rs1 = insn_rs1;
+        rs2 = insn_rs2;
+
+        case (insn_from_imem[14:12])
           3'b000: begin
             // BEQ: Branch if Equal
             if (rs1_data == rs2_data) begin
-              // POSSIBLE ISSUE: do i left shift by 1 here?
               assign pcNext = pcCurrent + imm_b_sext;
             end else begin
               assign pcNext = pcCurrent + 32'd4;
@@ -503,7 +508,7 @@ module DatapathSingleCycle (
           end
           3'b100: begin
             // BLT: Branch if Less Than
-            if (rs1_data < $signed(rs2_data)) begin
+            if ($signed(rs1_data) < $signed(rs2_data)) begin
               assign pcNext = pcCurrent + imm_b_sext;
             end else begin
               assign pcNext = pcCurrent + 32'd4;
@@ -511,7 +516,7 @@ module DatapathSingleCycle (
           end
           3'b101: begin
             // BGE: Branch if Greater Than or Equal
-            if (rs1_data >= $signed(rs2_data)) begin
+            if ($signed(rs1_data) >= $signed(rs2_data)) begin
               assign pcNext = pcCurrent + imm_b_sext;
             end else begin
               assign pcNext = pcCurrent + 32'd4;
@@ -519,7 +524,7 @@ module DatapathSingleCycle (
           end
           3'b110: begin
             // BLTU: Branch if Less Than Unsigned
-            if (rs1_data < $unsigned(rs2_data)) begin
+            if ($unsigned(rs1_data) < $unsigned(rs2_data)) begin
               assign pcNext = pcCurrent + imm_b_sext;
             end else begin
               assign pcNext = pcCurrent + 32'd4;
@@ -527,7 +532,7 @@ module DatapathSingleCycle (
           end
           3'b111: begin
             // BGEU: Branch if Greater Than or Equal Unsigned
-            if (rs1_data >= $unsigned(rs2_data)) begin
+            if ($unsigned(rs1_data) >= $unsigned(rs2_data)) begin
               assign pcNext = pcCurrent + imm_b_sext;
             end else begin
               assign pcNext = pcCurrent + 32'd4;
