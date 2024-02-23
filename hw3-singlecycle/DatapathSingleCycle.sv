@@ -228,12 +228,22 @@ module DatapathSingleCycle (
 
   logic [31:0] cla_a;
   logic [31:0] cla_b;
+  logic [31:0] cla_inc_in;
+  logic [31:0] cla_inc_out;
+  wire [31:0] cla_single = 32'b1;
 
   cla c (
       .a  (cla_a),
       .b  (cla_b),
       .cin(1'b0),
       .sum(rd_data_inter)
+  );
+
+  cla c_inc (
+      .a  (cla_inc_in),
+      .b  (cla_single),
+      .cin(1'b0),
+      .sum(cla_inc_out)
   );
 
   RegFile rf (
@@ -386,7 +396,8 @@ module DatapathSingleCycle (
                 rs2 = insn_rs2;
 
                 cla_a = rs1_data;
-                cla_b = -rs2_data;  // TODO: CHECK IF SUB FAILS, maybe sign?
+                cla_inc_in = ~rs2_data;  // invert all the bits
+                cla_b = cla_inc_out;  // add 1
                 rd_data = rd_data_inter;
 
                 we = 1;
