@@ -488,7 +488,7 @@ module DatapathSingleCycle (
             // BEQ: Branch if Equal
             if (rs1_data == rs2_data) begin
               // POSSIBLE ISSUE: do i left shift by 1 here?
-              assign pcNext = pcCurrent + (imm_b_sext << 1);
+              assign pcNext = pcCurrent + imm_b_sext;
             end else begin
               assign pcNext = pcCurrent + 32'd4;
             end
@@ -496,7 +496,7 @@ module DatapathSingleCycle (
           3'b001: begin
             // BNE: Branch if Not Equal
             if (rs1_data != rs2_data) begin
-              assign pcNext = pcCurrent + (imm_b_sext << 1);
+              assign pcNext = pcCurrent + imm_b_sext;
             end else begin
               assign pcNext = pcCurrent + 32'd4;
             end
@@ -504,7 +504,7 @@ module DatapathSingleCycle (
           3'b100: begin
             // BLT: Branch if Less Than
             if (rs1_data < $signed(rs2_data)) begin
-              assign pcNext = pcCurrent + (imm_b_sext << 1);
+              assign pcNext = pcCurrent + imm_b_sext;
             end else begin
               assign pcNext = pcCurrent + 32'd4;
             end
@@ -512,7 +512,7 @@ module DatapathSingleCycle (
           3'b101: begin
             // BGE: Branch if Greater Than or Equal
             if (rs1_data >= $signed(rs2_data)) begin
-              assign pcNext = pcCurrent + (imm_b_sext << 1);
+              assign pcNext = pcCurrent + imm_b_sext;
             end else begin
               assign pcNext = pcCurrent + 32'd4;
             end
@@ -520,7 +520,7 @@ module DatapathSingleCycle (
           3'b110: begin
             // BLTU: Branch if Less Than Unsigned
             if (rs1_data < $unsigned(rs2_data)) begin
-              assign pcNext = pcCurrent + (imm_b_sext << 1);
+              assign pcNext = pcCurrent + imm_b_sext;
             end else begin
               assign pcNext = pcCurrent + 32'd4;
             end
@@ -528,7 +528,7 @@ module DatapathSingleCycle (
           3'b111: begin
             // BGEU: Branch if Greater Than or Equal Unsigned
             if (rs1_data >= $unsigned(rs2_data)) begin
-              assign pcNext = pcCurrent + (imm_b_sext << 1);
+              assign pcNext = pcCurrent + imm_b_sext;
             end else begin
               assign pcNext = pcCurrent + 32'd4;
             end
