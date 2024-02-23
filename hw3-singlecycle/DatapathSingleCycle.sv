@@ -222,8 +222,19 @@ module DatapathSingleCycle (
   logic illegal_insn;
 
   logic [4:0] rd, rs1, rs2;
+  logic [31:0] rd_data_inter;
   logic [31:0] rd_data, rs1_data, rs2_data;
   logic we;
+
+  logic [31:0] cla_a;
+  logic [31:0] cla_b;
+
+  cla c (
+    .a(cla_a),
+    .b(cla_b),
+    .cin(1'b0),
+    .sum(rd_data_inter)
+  );
   
   RegFile rf (
       .rd(rd),
@@ -264,7 +275,11 @@ module DatapathSingleCycle (
 
             rd = insn_rd;
             rs1 = insn_rs1;
-            rd_data = rs1_data + imm_i_sext;
+
+            cla_a = rs1_data;
+            cla_b = imm_i_sext;
+            rd_data = rd_data_inter;
+
             we = 1;
           end
           3'b010: begin
@@ -272,7 +287,7 @@ module DatapathSingleCycle (
 
             rd = insn_rd;
             rs1 = insn_rs1;
-            rd_data = rs1_data < imm_i_sext ? 1 : 0;
+            rd_data = rs1_data < $signed(imm_i_sext) ? 1 : 0;
             we = 1;
           end
           3'b011: begin
@@ -281,7 +296,7 @@ module DatapathSingleCycle (
             rd = insn_rd;
             rs1 = insn_rs1;
 
-            rd_data = rs1_data < imm_i_sext ? 1 : 0;
+            rd_data = rs1_data < $unsigned(imm_i_sext) ? 1 : 0;
             we = 1;
           end
           3'b100: begin
@@ -355,7 +370,11 @@ module DatapathSingleCycle (
                 rd = insn_rd;
                 rs1 = insn_rs1;
                 rs2 = insn_rs2;
-                rd_data = rs1_data + rs2_data;
+
+                cla_a = rs1_data;
+                cla_b = rs2_data;
+                rd_data = rd_data_inter;
+
                 we = 1;
               end
               7'b0100000: begin
@@ -364,7 +383,11 @@ module DatapathSingleCycle (
                 rd = insn_rd;
                 rs1 = insn_rs1;
                 rs2 = insn_rs2;
-                rd_data = rs1_data - rs2_data;
+                
+                cla_a = rs1_data;
+                cla_b = -rs2_data;
+                rd_data = rd_data_inter;
+
                 we = 1;
               end
               default: begin
@@ -385,12 +408,10 @@ module DatapathSingleCycle (
             if (insn_from_imem[31:25] == 7'd0) begin
                 // SLT: Set Less Than
 
-                // Possible Issue: Not sure if this signed is correct
-
                 rd = insn_rd;
                 rs1 = insn_rs1;
                 rs2 = insn_rs2;
-                rd_data = rs1_data < rs2_data ? 1 : 0;
+                rd_data = rs1_data < $signed(rs2_data) ? 1 : 0;
                 we = 1;
               end
           end
@@ -401,7 +422,7 @@ module DatapathSingleCycle (
                 rd = insn_rd;
                 rs1 = insn_rs1;
                 rs2 = insn_rs2;
-                rd_data = rs1_data < rs2_data ? 1 : 0;
+                rd_data = rs1_data < $unsigned(rs2_data)  ? 1 : 0;
                 we = 1;
             end
           end
@@ -458,6 +479,68 @@ module DatapathSingleCycle (
             we = 1;
           end
         endcase
+      end
+      OpBranch: begin
+        case(insn_from_imem[14:12])
+          3'b000: begin
+            // BEQ: Branch if Equal
+            if (rs1_data == rs2_data) begin
+              // POSSIBLE ISSUE: do i left shift by 1 here?
+              pcNext = pcCurrent + (imm_b_sext << 1);
+            end else begin
+              pcNext = pcCurrent + 32'd4;
+            end
+          end
+          3'b001: begin
+            // BNE: Branch if Not Equal
+            if (rs1_data != rs2_data) begin
+              pcNext = pcCurrent + (imm_b_sext << 1);
+            end else begin
+              pcNext = pcCurrent + 32'd4;
+            end
+          end
+          3'b100: begin
+            // BLT: Branch if Less Than
+            if (rs1_data < $signed(rs2_data)) begin
+              pcNext = pcCurrent + (imm_b_sext << 1);
+            end else begin
+              pcNext = pcCurrent + 32'd4;
+            end
+          end
+          3'b101: begin
+            // BGE: Branch if Greater Than or Equal
+            if (rs1_data >= $signed(rs2_data)) begin
+              pcNext = pcCurrent + (imm_b_sext << 1);
+            end else begin
+              pcNext = pcCurrent + 32'd4;
+            end
+          end
+          3'b110: begin
+            // BLTU: Branch if Less Than Unsigned
+            if (rs1_data < $unsigned(rs2_data)) begin
+              pcNext = pcCurrent + (imm_b_sext << 1);
+            end else begin
+              pcNext = pcCurrent + 32'd4;
+            end
+          end
+          3'b111: begin
+            // BGEU: Branch if Greater Than or Equal Unsigned
+            if (rs1_data >= $unsigned(rs2_data)) begin
+              pcNext = pcCurrent + (imm_b_sext << 1);
+            end else begin
+              pcNext = pcCurrent + 32'd4;
+            end
+          end
+          default: begin
+            // do nothing ig
+          end
+        endcase
+      end
+      OpEnviron: begin
+        if (insn_from_imem[31:7] == 25'd0) begin
+          // ECALL: Environment Call
+          halt = 1;
+        end
       end
       default: begin
         illegal_insn = 1'b1;
