@@ -267,7 +267,7 @@ module DatapathSingleCycle (
         we = 1;
 
         // increment PC
-        assign pcNext = pcCurrent + 32'd4;
+        pcNext = pcCurrent + 32'd4;
       end
       OpRegImm: begin
         case (insn_from_imem[14:12])
@@ -359,7 +359,7 @@ module DatapathSingleCycle (
 
         endcase
         // increment PC
-        assign pcNext = pcCurrent + 32'd4;
+        pcNext = pcCurrent + 32'd4;
       end
       OpRegReg: begin
         case (insn_from_imem[14:12])
@@ -483,7 +483,7 @@ module DatapathSingleCycle (
           end
         endcase
         // increment PC
-        assign pcNext = pcCurrent + 32'd4;
+        pcNext = pcCurrent + 32'd4;
       end
       OpBranch: begin
         rs1 = insn_rs1;
@@ -493,49 +493,49 @@ module DatapathSingleCycle (
           3'b000: begin
             // BEQ: Branch if Equal
             if (rs1_data == rs2_data) begin
-              assign pcNext = pcCurrent + imm_b_sext;
+              pcNext = pcCurrent + imm_b_sext;
             end else begin
-              assign pcNext = pcCurrent + 32'd4;
+              pcNext = pcCurrent + 32'd4;
             end
           end
           3'b001: begin
             // BNE: Branch if Not Equal
             if (rs1_data != rs2_data) begin
-              assign pcNext = pcCurrent + imm_b_sext;
+              pcNext = pcCurrent + imm_b_sext;
             end else begin
-              assign pcNext = pcCurrent + 32'd4;
+              pcNext = pcCurrent + 32'd4;
             end
           end
           3'b100: begin
             // BLT: Branch if Less Than
             if ($signed(rs1_data) < $signed(rs2_data)) begin
-              assign pcNext = pcCurrent + imm_b_sext;
+              pcNext = pcCurrent + imm_b_sext;
             end else begin
-              assign pcNext = pcCurrent + 32'd4;
+              pcNext = pcCurrent + 32'd4;
             end
           end
           3'b101: begin
             // BGE: Branch if Greater Than or Equal
             if ($signed(rs1_data) >= $signed(rs2_data)) begin
-              assign pcNext = pcCurrent + imm_b_sext;
+              pcNext = pcCurrent + imm_b_sext;
             end else begin
-              assign pcNext = pcCurrent + 32'd4;
+              pcNext = pcCurrent + 32'd4;
             end
           end
           3'b110: begin
             // BLTU: Branch if Less Than Unsigned
             if ($unsigned(rs1_data) < $unsigned(rs2_data)) begin
-              assign pcNext = pcCurrent + imm_b_sext;
+              pcNext = pcCurrent + imm_b_sext;
             end else begin
-              assign pcNext = pcCurrent + 32'd4;
+              pcNext = pcCurrent + 32'd4;
             end
           end
           3'b111: begin
             // BGEU: Branch if Greater Than or Equal Unsigned
             if ($unsigned(rs1_data) >= $unsigned(rs2_data)) begin
-              assign pcNext = pcCurrent + imm_b_sext;
+              pcNext = pcCurrent + imm_b_sext;
             end else begin
-              assign pcNext = pcCurrent + 32'd4;
+              pcNext = pcCurrent + 32'd4;
             end
           end
           default: begin
