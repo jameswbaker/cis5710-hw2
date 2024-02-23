@@ -249,6 +249,7 @@ async def testBeqNotTaken(dut):
     await preTestSetup(dut)
 
     await ClockCycles(dut.clock_proc, 4)
+    print(dut.datapath.rf.regs[1].value)
     assert dut.datapath.rf.regs[1].value == 0x54321000, f'failed at cycle {dut.datapath.cycles_current.value.integer}'
     pass
 
