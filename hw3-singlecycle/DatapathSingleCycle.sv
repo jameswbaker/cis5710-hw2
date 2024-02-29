@@ -236,6 +236,7 @@ module DatapathSingleCycle (
 
   logic [31:0] o_remainder;
   logic [31:0] o_quotient;
+  logic [31:0] int_one;
 
   cla c (
       .a  (cla_a),
@@ -502,25 +503,23 @@ module DatapathSingleCycle (
               we = 1;
             end
             if (insn_from_imem[31:25] == 7'd1) begin
-              // DIV: signed divide
+              // DIV: divide
               rd  = insn_rd;
               rs1 = insn_rs1;
               rs2 = insn_rs2;
 
+              
+              // TODO: Fix error here
               if (rs2_data == 0) begin
-                rd_data = $signed(-1);
-              end else
-
-              if ((rs1_data[31] == 1 && rs2_data[31] == 0) || (rs1_data[31] == 0 && rs2_data[31] == 1)) begin
-                // create an XOR mask to take the absolute value of rs1_data
-
+                int_one = 1;
+                rd_data = ~int_one + 1;
+              end else if ((rs1_data[31] == 1 && rs2_data[31] == 0) || (rs1_data[31] == 0 && rs2_data[31] == 1)) begin
+                // o_quotient is unsigned, so we need to change it to be negative since in these cases quotient is negative
+                rd_data = ~o_quotient + 1;
+              end else begin
+                rd_data = o_quotient;
               end
 
-
-
-
-
-              rd_data = o_quotient;
               we = 1;
             end
           end
@@ -542,6 +541,22 @@ module DatapathSingleCycle (
                 rs1 = insn_rs1;
                 rs2 = insn_rs2;
                 rd_data = $signed(rs1_data) >>> rs2_data[4:0];
+                we = 1;
+              end
+              7'b0000001: begin
+                // DIVU: divide unsigned
+                rd  = insn_rd;
+                rs1 = insn_rs1;
+                rs2 = insn_rs2;
+
+                // Possible Issue: Just return -1 here, but since its unsigned its FFFFF or whatever
+                if (rs2_data == 0) begin
+                  int_one = 1;
+                  rd_data = ~int_one + 1;
+                end else begin
+                  rd_data = o_quotient;
+                end
+
                 we = 1;
               end
               default: begin
