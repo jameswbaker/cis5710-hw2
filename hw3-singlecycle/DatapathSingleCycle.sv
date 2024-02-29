@@ -232,6 +232,11 @@ module DatapathSingleCycle (
   logic [31:0] cla_inc_out;
   wire [31:0] cla_single = 32'b1;
 
+  logic [63:0] mul_result;
+
+  logic [31:0] o_remainder;
+  logic [31:0] o_quotient;
+
   cla c (
       .a  (cla_a),
       .b  (cla_b),
@@ -244,6 +249,13 @@ module DatapathSingleCycle (
       .b  (cla_single),
       .cin(1'b0),
       .sum(cla_inc_out)
+  );
+
+  divider_unsigned unsigned_div (
+      .i_dividend (rs1_data),
+      .i_divisor  (rs2_data),
+      .o_remainder(o_remainder),
+      .o_quotient (o_quotient)
   );
 
   RegFile rf (
@@ -377,7 +389,6 @@ module DatapathSingleCycle (
             case (insn_from_imem[31:25])
               7'd0: begin
                 // ADD: Add
-
                 rd = insn_rd;
                 rs1 = insn_rs1;
                 rs2 = insn_rs2;
@@ -388,9 +399,18 @@ module DatapathSingleCycle (
 
                 we = 1;
               end
+              7'd1: begin
+                // MUL: multiply, only keeping the lower 32 bits
+                rd = insn_rd;
+                rs1 = insn_rs1;
+                rs2 = insn_rs2;
+
+                rd_data = rs1_data * rs2_data;
+
+                we = 1;
+              end
               7'b0100000: begin
                 // SUB: Subtract
-
                 rd = insn_rd;
                 rs1 = insn_rs1;
                 rs2 = insn_rs2;
@@ -416,6 +436,17 @@ module DatapathSingleCycle (
               rd_data = rs1_data << rs2_data[4:0];
               we = 1;
             end
+            if (insn_from_imem[31:25] == 7'd1) begin
+              // MULH: multiply and keep top 32 bits
+              rd = insn_rd;
+              rs1 = insn_rs1;
+              rs2 = insn_rs2;
+
+              mul_result = $signed(rs1_data) * $signed(rs2_data);
+              rd_data = mul_result[63:32];
+
+              we = 1;
+            end
           end
           3'b010: begin
             if (insn_from_imem[31:25] == 7'd0) begin
@@ -427,6 +458,17 @@ module DatapathSingleCycle (
               rd_data = $signed(rs1_data) < $signed(rs2_data) ? 1 : 0;  // TODO: CHECK (signed?)
               we = 1;
             end
+            if (insn_from_imem[31:25] == 7'd1) begin
+              // MULHSU: multiply and keep top 32 bits
+              rd = insn_rd;
+              rs1 = insn_rs1;
+              rs2 = insn_rs2;
+
+              mul_result = $signed(rs1_data) * $unsigned(rs2_data);
+              rd_data = mul_result[63:32];
+
+              we = 1;
+            end
           end
           3'b011: begin
             if (insn_from_imem[31:25] == 7'd0) begin
@@ -435,19 +477,52 @@ module DatapathSingleCycle (
               rd = insn_rd;
               rs1 = insn_rs1;
               rs2 = insn_rs2;
-              rd_data = $unsigned(rs1_data) < $unsigned(rs2_data) ? 1 :
-                  0;  // TODO: CHECK (unsigned?)
+              rd_data = $unsigned(rs1_data) < $unsigned(rs2_data) ? 1 : 0;
+              we = 1;
+            end
+            if (insn_from_imem[31:25] == 7'd1) begin
+              // MULHU: multiply and keep top 32 bits
+              rd = insn_rd;
+              rs1 = insn_rs1;
+              rs2 = insn_rs2;
+
+              mul_result = $unsigned(rs1_data) * $unsigned(rs2_data);
+              rd_data = mul_result[63:32];
+
               we = 1;
             end
           end
           3'b100: begin
-            // XOR: XOR
+            if (insn_from_imem[31:25] == 7'd0) begin
+              // XOR: shift left unsigned
+              rd = insn_rd;
+              rs1 = insn_rs1;
+              rs2 = insn_rs2;
+              rd_data = rs1_data ^ rs2_data;
+              we = 1;
+            end
+            if (insn_from_imem[31:25] == 7'd1) begin
+              // DIV: signed divide
+              rd  = insn_rd;
+              rs1 = insn_rs1;
+              rs2 = insn_rs2;
 
-            rd = insn_rd;
-            rs1 = insn_rs1;
-            rs2 = insn_rs2;
-            rd_data = rs1_data ^ rs2_data;
-            we = 1;
+              if (rs2_data == 0) begin
+                rd_data = $signed(-1);
+              end else
+
+              if ((rs1_data[31] == 1 && rs2_data[31] == 0) || (rs1_data[31] == 0 && rs2_data[31] == 1)) begin
+                // create an XOR mask to take the absolute value of rs1_data
+
+              end
+
+
+
+
+
+              rd_data = o_quotient;
+              we = 1;
+            end
           end
           3'b101: begin
             case (insn_from_imem[31:25])

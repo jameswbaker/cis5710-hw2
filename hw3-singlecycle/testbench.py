@@ -263,7 +263,23 @@ async def testBneTaken(dut):
         target: lui x0,0''')
     await preTestSetup(dut)
 
+    # fails with 4 clock cycles?
     await ClockCycles(dut.clock_proc, 3)
+    assert dut.datapath.rf.regs[1].value == 0x12345000, f'failed at cycle {dut.datapath.cycles_current.value.integer}'
+    pass
+
+@cocotb.test()
+async def testBeqTaken(dut):
+    "beq which is taken"
+    asm(dut, '''
+        lui x1,0x12345
+        beq x0,x0,target
+        lui x1,0x54321
+        target: lui x0,0''')
+    await preTestSetup(dut)
+
+    await ClockCycles(dut.clock_proc, 3)
+    print(dut.datapath.rf.regs[1].value)
     assert dut.datapath.rf.regs[1].value == 0x12345000, f'failed at cycle {dut.datapath.cycles_current.value.integer}'
     pass
 
@@ -280,9 +296,33 @@ async def testEcall(dut):
     pass
 
 @cocotb.test()
+async def testLuiWithShift(dut):
+    "testing test3 from riscv lui suite"
+    # asm(dut, '''
+    #     addi	x3,x0,3
+    #     lui	    x1,0xfffff
+    #     sra	    x1,x1,0x1
+    #     addi	x7,x0,-2048
+    #     ecall''')
+    asm(dut,
+    '''
+    addi	x3,x0,3
+    lui	x1,0x80000
+    addi	x2,x0,1
+    sra	x14,x1,x2
+    lui	x7,0xc0000
+    ''')
+              	
+    await preTestSetup(dut)
+
+    await ClockCycles(dut.clock_proc, 10) # check for halt *during* ecall, not afterwards
+    assert dut.datapath.rf.regs[7].value == dut.datapath.rf.regs[14].value, f'failed at cycle {dut.datapath.cycles_current.value.integer}'
+    pass
+
+@cocotb.test()
 async def testOneRiscvTest(dut):
     "Use this to run one particular riscv test"
-    await riscvTest(dut, RISCV_TESTS_PATH / 'rv32ui-p-simple')
+    await riscvTest(dut, RISCV_TESTS_PATH / 'rv32ui-p-mul')
 
 async def riscvTest(dut, binaryPath=None):
     "Run the official RISC-V test whose binary lives at `binaryPath`"
