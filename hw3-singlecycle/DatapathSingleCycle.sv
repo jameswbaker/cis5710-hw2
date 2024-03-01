@@ -226,6 +226,8 @@ module DatapathSingleCycle (
   logic [`REG_SIZE] rd_data, rs1_data, rs2_data;
   logic we;
 
+  logic [`REG_SIZE] unaligned_addr_to_dmem;  // Unaligned raw addr to dmem
+
   logic [`REG_SIZE] cla_a;
   logic [`REG_SIZE] cla_b;
   logic [`REG_SIZE] cla_inc_in;
@@ -278,6 +280,7 @@ module DatapathSingleCycle (
   always_comb begin
     illegal_insn = 1'b0;
     halt = 0;
+    store_data_to_dmem = 0;
 
     case (insn_opcode)
       OpLui: begin
@@ -745,20 +748,39 @@ module DatapathSingleCycle (
         case (insn_from_imem[14:12])
           3'b000: begin
             // LB: Load Byte
-
             rd = insn_rd;
             rs1 = insn_rs1;
-            addr_to_dmem = rs1_data + imm_i_sext;
-
-            rd_data = load_data_from_dmem;
             we = 1;
+
+            // Set address
+            unaligned_addr_to_dmem = $signed(rs1_data) + $signed(imm_i_sext);
+            addr_to_dmem = {unaligned_addr_to_dmem[31:2], 2'b0};
+
+            // Choose which byte of the loaded word to take
+            // We also need to sign-extend our result manually
+            case (unaligned_addr_to_dmem[1:0])
+              2'b00: begin
+                rd_data = {{24{load_data_from_dmem[7]}}, load_data_from_dmem[7:0]};
+              end
+              2'b01: begin
+                rd_data = {{24{load_data_from_dmem[15]}}, load_data_from_dmem[15:8]};
+              end
+              2'b10: begin
+                rd_data = {{24{load_data_from_dmem[23]}}, load_data_from_dmem[23:16]};
+              end
+              2'b11: begin
+                rd_data = {{24{load_data_from_dmem[31]}}, load_data_from_dmem[31:24]};
+              end
+              default: begin
+              end
+            endcase
           end
           3'b001: begin
             // LH: Load half-word
 
             rd = insn_rd;
             rs1 = insn_rs1;
-            addr_to_dmem = rs1_data + imm_i_sext;
+            addr_to_dmem = rs1_data + $signed(imm_i_sext);
 
             rd_data = load_data_from_dmem;
             we = 1;
@@ -768,7 +790,7 @@ module DatapathSingleCycle (
 
             rd = insn_rd;
             rs1 = insn_rs1;
-            addr_to_dmem = rs1_data + imm_i_sext;
+            addr_to_dmem = rs1_data + $signed(imm_i_sext);
 
             rd_data = load_data_from_dmem;
             we = 1;
@@ -778,7 +800,7 @@ module DatapathSingleCycle (
 
             rd = insn_rd;
             rs1 = insn_rs1;
-            addr_to_dmem = rs1_data + imm_i_sext;
+            addr_to_dmem = rs1_data + $signed(imm_i_sext);
 
             rd_data = load_data_from_dmem;
             we = 1;
@@ -804,17 +826,39 @@ module DatapathSingleCycle (
         case (insn_from_imem[14:12])
           3'b000: begin
             // SB: Save byte
-
             rs1 = insn_rs1;
-            addr_to_dmem = rs1_data + imm_i_sext;
+            rs2 = insn_rs2;
 
-            store_we_to_dmem = 4'b0001;
+            // Set address
+            unaligned_addr_to_dmem = $signed(rs1_data) + $signed(imm_s_sext);
+            addr_to_dmem = {unaligned_addr_to_dmem[31:2], 2'b0};
+
+            // Choose which byte to store in this word
+            case (unaligned_addr_to_dmem[1:0])
+              2'b00: begin
+                store_we_to_dmem   = 4'b0001;
+                store_data_to_dmem = {24'b0, rs2_data[7:0]};
+              end
+              2'b01: begin
+                store_we_to_dmem   = 4'b0010;
+                store_data_to_dmem = {16'b0, rs2_data[7:0], 8'b0};
+              end
+              2'b10: begin
+                store_we_to_dmem   = 4'b0100;
+                store_data_to_dmem = {8'b0, rs2_data[7:0], 16'b0};
+              end
+              2'b11: begin
+                store_we_to_dmem   = 4'b1000;
+                store_data_to_dmem = {rs2_data[7:0], 24'b0};
+              end
+              default: begin
+              end
+            endcase
           end
           3'b001: begin
             // SH: Save half-word
-
             rs1 = insn_rs1;
-            addr_to_dmem = rs1_data + imm_i_sext;
+            addr_to_dmem = $signed(rs1_data) + $signed(imm_s_sext);
 
             store_we_to_dmem = 4'b0011;
           end
@@ -822,8 +866,7 @@ module DatapathSingleCycle (
             // SW: Save word
             rs1 = insn_rs1;
             rs2 = insn_rs2;
-            // addr_to_dmem = 32'b100000;
-            addr_to_dmem = imm_i_sext;
+            addr_to_dmem = $signed(rs1_data) + $signed(imm_s_sext);
 
             store_data_to_dmem = rs2_data;
             store_we_to_dmem = 4'b1111;
