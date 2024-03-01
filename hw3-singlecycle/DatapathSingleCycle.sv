@@ -281,6 +281,8 @@ module DatapathSingleCycle (
     illegal_insn = 1'b0;
     halt = 0;
     store_data_to_dmem = 0;
+    store_we_to_dmem = 4'b0;
+    we = 0;
 
     case (insn_opcode)
       OpLui: begin
@@ -777,43 +779,99 @@ module DatapathSingleCycle (
           end
           3'b001: begin
             // LH: Load half-word
-
             rd = insn_rd;
             rs1 = insn_rs1;
-            addr_to_dmem = rs1_data + $signed(imm_i_sext);
 
-            rd_data = load_data_from_dmem;
-            we = 1;
+            // Set address
+            unaligned_addr_to_dmem = $signed(rs1_data) + $signed(imm_i_sext);
+
+            // Only allow valid addresses (last bit must be 0)
+            if (unaligned_addr_to_dmem[0] == 0) begin
+              we = 1;
+              addr_to_dmem = {unaligned_addr_to_dmem[31:2], 2'b0};
+
+              // Choose which byte of the loaded word to take
+              // We also need to sign-extend our result manually
+              case (unaligned_addr_to_dmem[1])
+                1'b0: begin
+                  rd_data = {{16{load_data_from_dmem[15]}}, load_data_from_dmem[15:0]};
+                end
+                1'b1: begin
+                  rd_data = {{16{load_data_from_dmem[31]}}, load_data_from_dmem[31:16]};
+                end
+                default: begin
+                end
+              endcase
+            end
           end
           3'b010: begin
             // LW: Load word
-
             rd = insn_rd;
             rs1 = insn_rs1;
-            addr_to_dmem = rs1_data + $signed(imm_i_sext);
+            unaligned_addr_to_dmem = $signed(rs1_data) + $signed(imm_i_sext);
 
-            rd_data = load_data_from_dmem;
-            we = 1;
+            // Only allow valid addresses (last two bits must be 0)
+            if (unaligned_addr_to_dmem[1:0] == 2'b0) begin
+              we = 1;
+              addr_to_dmem = unaligned_addr_to_dmem;
+              rd_data = load_data_from_dmem;
+            end
           end
           3'b100: begin
             // LBU: Load byte unsigned
-
             rd = insn_rd;
             rs1 = insn_rs1;
-            addr_to_dmem = rs1_data + $signed(imm_i_sext);
-
-            rd_data = load_data_from_dmem;
             we = 1;
+
+            // Set address
+            unaligned_addr_to_dmem = $signed(rs1_data) + $signed(imm_i_sext);
+            addr_to_dmem = {unaligned_addr_to_dmem[31:2], 2'b0};
+
+            // Choose which byte of the loaded word to take
+            // We also need to ZERO-extend our result manually
+            case (unaligned_addr_to_dmem[1:0])
+              2'b00: begin
+                rd_data = {24'b0, load_data_from_dmem[7:0]};
+              end
+              2'b01: begin
+                rd_data = {24'b0, load_data_from_dmem[15:8]};
+              end
+              2'b10: begin
+                rd_data = {24'b0, load_data_from_dmem[23:16]};
+              end
+              2'b11: begin
+                rd_data = {24'b0, load_data_from_dmem[31:24]};
+              end
+              default: begin
+              end
+            endcase
           end
           3'b101: begin
             // LHU: Load half-word unsigned
-
             rd = insn_rd;
             rs1 = insn_rs1;
-            addr_to_dmem = rs1_data + imm_i_sext;
 
-            rd_data = load_data_from_dmem;
-            we = 1;
+            // Set address
+            unaligned_addr_to_dmem = $signed(rs1_data) + $signed(imm_i_sext);
+
+            // Only allow valid addresses (last bit must be 0)
+            if (unaligned_addr_to_dmem[0] == 0) begin
+              we = 1;
+              addr_to_dmem = {unaligned_addr_to_dmem[31:2], 2'b0};
+
+              // Choose which byte of the loaded word to take
+              // We also need to ZERO-extend our result manually
+              case (unaligned_addr_to_dmem[1])
+                1'b0: begin
+                  rd_data = {16'b0, load_data_from_dmem[15:0]};
+                end
+                1'b1: begin
+                  rd_data = {16'b0, load_data_from_dmem[31:16]};
+                end
+                default: begin
+                end
+              endcase
+            end
           end
           default: begin
           end
@@ -858,22 +916,48 @@ module DatapathSingleCycle (
           3'b001: begin
             // SH: Save half-word
             rs1 = insn_rs1;
-            addr_to_dmem = $signed(rs1_data) + $signed(imm_s_sext);
+            rs2 = insn_rs2;
 
-            store_we_to_dmem = 4'b0011;
+            // Set address
+            unaligned_addr_to_dmem = $signed(rs1_data) + $signed(imm_s_sext);
+            addr_to_dmem = {unaligned_addr_to_dmem[31:2], 2'b0};
+
+            if (unaligned_addr_to_dmem[0] != 0) begin
+              // Choose which byte to store in this word
+              case (unaligned_addr_to_dmem[1])
+                1'b0: begin
+                  store_we_to_dmem   = 4'b0011;
+                  store_data_to_dmem = {16'b0, rs2_data[15:0]};
+                end
+                1'b1: begin
+                  store_we_to_dmem   = 4'b1100;
+                  store_data_to_dmem = {rs2_data[31:16], 16'b0};
+                end
+                default: begin
+                end
+              endcase
+            end
           end
           3'b010: begin
             // SW: Save word
             rs1 = insn_rs1;
             rs2 = insn_rs2;
-            addr_to_dmem = $signed(rs1_data) + $signed(imm_s_sext);
 
-            store_data_to_dmem = rs2_data;
-            store_we_to_dmem = 4'b1111;
+            // Set address
+            unaligned_addr_to_dmem = $signed(rs1_data) + $signed(imm_s_sext);
+
+            if (unaligned_addr_to_dmem[1:0] != 2'b0) begin
+              addr_to_dmem = unaligned_addr_to_dmem;
+              store_we_to_dmem = 4'b1111;
+              store_data_to_dmem = rs2_data;
+            end
           end
           default: begin
           end
         endcase
+
+        // increment PC
+        pcNext = pcCurrent + 32'd4;
       end
       OpMiscMem: begin
         // NOP
