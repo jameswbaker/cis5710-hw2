@@ -62,10 +62,10 @@ module DatapathSingleCycle (
     output logic [`REG_SIZE] pc_to_imem,
     input wire [`REG_SIZE] insn_from_imem,
     // addr_to_dmem is a read-write port
-    output wire [`REG_SIZE] addr_to_dmem,
+    output logic [`REG_SIZE] addr_to_dmem,
     input logic [`REG_SIZE] load_data_from_dmem,
-    output wire [`REG_SIZE] store_data_to_dmem,
-    output wire [3:0] store_we_to_dmem
+    output logic [`REG_SIZE] store_data_to_dmem,
+    output logic [3:0] store_we_to_dmem
 );
 
   // components of the instruction
@@ -997,17 +997,17 @@ module MemorySingleCycle #(
     output logic [`REG_SIZE] insn_from_imem,
 
     // must always be aligned to a 4B boundary
-    input wire [`REG_SIZE] addr_to_dmem,
+    input logic [`REG_SIZE] addr_to_dmem,
 
     // the value at memory location addr_to_dmem
     output logic [`REG_SIZE] load_data_from_dmem,
 
     // the value to be written to addr_to_dmem, controlled by store_we_to_dmem
-    input wire [`REG_SIZE] store_data_to_dmem,
+    input logic [`REG_SIZE] store_data_to_dmem,
 
     // Each bit determines whether to write the corresponding byte of store_data_to_dmem to memory location addr_to_dmem.
     // E.g., 4'b1111 will write 4 bytes. 4'b0001 will write only the least-significant byte.
-    input wire [3:0] store_we_to_dmem
+    input logic [3:0] store_we_to_dmem
 );
 
   // memory is arranged as an array of 4B words
