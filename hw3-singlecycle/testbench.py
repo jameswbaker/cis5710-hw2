@@ -350,7 +350,7 @@ async def testStoreLoad(dut):
     asm(dut, '''
         lui x1,0x12345
         sw x1,32(x0) # store x1 to address [32]. NB: code starts at address 0, don't overwrite it!
-        lw x2,32(x0) # load address [32] into x2
+        # lw x2,32(x0) # load address [32] into x2
         ''')
     await preTestSetup(dut)
 

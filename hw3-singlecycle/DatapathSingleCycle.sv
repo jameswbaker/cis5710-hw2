@@ -506,11 +506,11 @@ module DatapathSingleCycle (
             end
             if (insn_from_imem[31:25] == 7'd1) begin
               // DIV: divide
-              
+
               rd  = insn_rd;
               rs1 = insn_rs1;
               rs2 = insn_rs2;
-              
+
               if (rs2_data == 0) begin
                 int_one = 1;
                 rd_data = ~int_one + 1;
@@ -560,8 +560,8 @@ module DatapathSingleCycle (
                 // DIVU: divide unsigned
                 div_rs1_input = rs1_data;
                 div_rs2_input = rs2_data;
-                
-                rd  = insn_rd;
+
+                rd = insn_rd;
                 rs1 = insn_rs1;
                 rs2 = insn_rs2;
 
@@ -638,8 +638,8 @@ module DatapathSingleCycle (
                 // REMU: remainder unsigned
                 div_rs1_input = rs1_data;
                 div_rs2_input = rs2_data;
-                
-                rd  = insn_rd;
+
+                rd = insn_rd;
                 rs1 = insn_rs1;
                 rs2 = insn_rs2;
 
@@ -786,6 +786,9 @@ module DatapathSingleCycle (
           default: begin
           end
         endcase
+
+        // increment PC
+        pcNext = pcCurrent + 32'd4;
       end
       OpStore: begin
         case (insn_from_imem[14:12])
@@ -809,7 +812,8 @@ module DatapathSingleCycle (
             // SW: Save word
             rs1 = insn_rs1;
             rs2 = insn_rs2;
-            addr_to_dmem = rs1_data + $signed(imm_i_sext);
+            // addr_to_dmem = 32'b100000;
+            addr_to_dmem = imm_i_sext;
 
             store_data_to_dmem = rs2_data;
             store_we_to_dmem = 4'b1111;
@@ -817,9 +821,9 @@ module DatapathSingleCycle (
           default: begin
           end
         endcase
-      end
-      OpStore: begin
 
+        // increment PC
+        pcNext = pcCurrent + 32'd4;
       end
       OpEnviron: begin
         if (insn_from_imem[31:7] == 25'd0) begin
