@@ -922,7 +922,7 @@ module DatapathSingleCycle (
             unaligned_addr_to_dmem = $signed(rs1_data) + $signed(imm_s_sext);
             addr_to_dmem = {unaligned_addr_to_dmem[31:2], 2'b0};
 
-            if (unaligned_addr_to_dmem[0] != 0) begin
+            if (unaligned_addr_to_dmem[0] == 0) begin
               // Choose which byte to store in this word
               case (unaligned_addr_to_dmem[1])
                 1'b0: begin
@@ -931,7 +931,7 @@ module DatapathSingleCycle (
                 end
                 1'b1: begin
                   store_we_to_dmem   = 4'b1100;
-                  store_data_to_dmem = {rs2_data[31:16], 16'b0};
+                  store_data_to_dmem = {rs2_data[15:0], 16'b0};
                 end
                 default: begin
                 end
@@ -946,7 +946,7 @@ module DatapathSingleCycle (
             // Set address
             unaligned_addr_to_dmem = $signed(rs1_data) + $signed(imm_s_sext);
 
-            if (unaligned_addr_to_dmem[1:0] != 2'b0) begin
+            if (unaligned_addr_to_dmem[1:0] == 2'b0) begin
               addr_to_dmem = unaligned_addr_to_dmem;
               store_we_to_dmem = 4'b1111;
               store_data_to_dmem = rs2_data;
