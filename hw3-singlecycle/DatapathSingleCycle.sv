@@ -718,6 +718,19 @@ module DatapathSingleCycle (
           end
         endcase
       end
+      // Possible Issue: Should these next 2 have write enable??
+      OpJal: begin
+        rd = insn_rd;
+        rd_data = pcCurrent + 4;
+        pcNext = pcCurrent + imm_j_sext;
+      end
+      OpJalr: begin
+        rd = insn_rd;
+        rs1 = insn_rs1;
+
+        rd_data = pcCurrent + 4;
+        pcNext = (rs1_data + imm_i_sext) & ~(32'd1);
+      end
       OpLoad: begin
         // case(insn_from_imem[14:12])
         //   3'b000: begin
@@ -729,6 +742,9 @@ module DatapathSingleCycle (
         //     we = 0;
         //   end
         // endcase
+      end
+      OpStore: begin
+
       end
       OpEnviron: begin
         if (insn_from_imem[31:7] == 25'd0) begin
