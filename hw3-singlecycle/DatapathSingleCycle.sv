@@ -828,8 +828,9 @@ module DatapathSingleCycle (
           end
         endcase
       end
-      OpStore: begin
-        
+      OpMiscMem: begin
+        // NOP
+        pcNext = pcCurrent + 32'd4;
       end
       OpEnviron: begin
         if (insn_from_imem[31:7] == 25'd0) begin
