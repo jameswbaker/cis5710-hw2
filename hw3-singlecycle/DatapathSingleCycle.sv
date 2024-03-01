@@ -234,6 +234,8 @@ module DatapathSingleCycle (
 
   logic [63:0] mul_result;
 
+  logic [31:0] div_rs1_input;
+  logic [31:0] div_rs2_input;
   logic [31:0] o_remainder;
   logic [31:0] o_quotient;
   logic [31:0] int_one;
@@ -253,8 +255,8 @@ module DatapathSingleCycle (
   );
 
   divider_unsigned unsigned_div (
-      .i_dividend (rs1_data),
-      .i_divisor  (rs2_data),
+      .i_dividend (div_rs1_input),
+      .i_divisor  (div_rs2_input),
       .o_remainder(o_remainder),
       .o_quotient (o_quotient)
   );
@@ -504,19 +506,30 @@ module DatapathSingleCycle (
             end
             if (insn_from_imem[31:25] == 7'd1) begin
               // DIV: divide
+              
               rd  = insn_rd;
               rs1 = insn_rs1;
               rs2 = insn_rs2;
-
               
-              // TODO: Fix error here
               if (rs2_data == 0) begin
                 int_one = 1;
                 rd_data = ~int_one + 1;
-              end else if ((rs1_data[31] == 1 && rs2_data[31] == 0) || (rs1_data[31] == 0 && rs2_data[31] == 1)) begin
-                // o_quotient is unsigned, so we need to change it to be negative since in these cases quotient is negative
+              end else if (rs1_data[31] == 1 && rs2_data[31] == 0) begin
+                div_rs1_input = ~rs1_data + 1;
+                div_rs2_input = rs2_data;
                 rd_data = ~o_quotient + 1;
+              end else if (rs1_data[31] == 0 && rs2_data[31] == 1) begin
+                // o_quotient is unsigned, so we need to change it to be negative since in these cases quotient is negative
+                div_rs1_input = rs1_data;
+                div_rs2_input = ~rs2_data + 1;
+                rd_data = ~o_quotient + 1;
+              end else if (rs1_data[31] == 1 && rs2_data[31] == 1) begin
+                div_rs1_input = ~rs1_data + 1;
+                div_rs2_input = ~rs2_data + 1;
+                rd_data = o_quotient;
               end else begin
+                div_rs1_input = rs1_data;
+                div_rs2_input = rs2_data;
                 rd_data = o_quotient;
               end
 
@@ -545,11 +558,13 @@ module DatapathSingleCycle (
               end
               7'b0000001: begin
                 // DIVU: divide unsigned
+                div_rs1_input = rs1_data;
+                div_rs2_input = rs2_data;
+                
                 rd  = insn_rd;
                 rs1 = insn_rs1;
                 rs2 = insn_rs2;
 
-                // Possible Issue: Just return -1 here, but since its unsigned its FFFFF or whatever
                 if (rs2_data == 0) begin
                   int_one = 1;
                   rd_data = ~int_one + 1;
@@ -565,22 +580,81 @@ module DatapathSingleCycle (
             endcase
           end
           3'b110: begin
-            // OR: OR
+            case (insn_from_imem[31:25])
+              7'd0: begin
+                // OR: OR
 
-            rd = insn_rd;
-            rs1 = insn_rs1;
-            rs2 = insn_rs2;
-            rd_data = rs1_data | rs2_data;
-            we = 1;
+                rd = insn_rd;
+                rs1 = insn_rs1;
+                rs2 = insn_rs2;
+                rd_data = rs1_data | rs2_data;
+                we = 1;
+              end
+              7'b0000001: begin
+                // REM
+
+                rd  = insn_rd;
+                rs1 = insn_rs1;
+                rs2 = insn_rs2;
+
+                if (rs2_data == 0) begin
+                  rd_data = rs1_data;
+                end else if (rs1_data[31] == 1 && rs2_data[31] == 0) begin
+                  div_rs1_input = ~rs1_data + 1;
+                  div_rs2_input = rs2_data;
+                  rd_data = ~o_remainder + 1;
+                end else if (rs1_data[31] == 0 && rs2_data[31] == 1) begin
+                  // o_quotient is unsigned, so we need to change it to be negative since in these cases quotient is negative
+                  div_rs1_input = rs1_data;
+                  div_rs2_input = ~rs2_data + 1;
+                  rd_data = o_remainder;
+                end else if (rs1_data[31] == 1 && rs2_data[31] == 1) begin
+                  div_rs1_input = ~rs1_data + 1;
+                  div_rs2_input = ~rs2_data + 1;
+                  rd_data = ~o_remainder + 1;
+                end else begin
+                  div_rs1_input = rs1_data;
+                  div_rs2_input = rs2_data;
+                  rd_data = o_remainder;
+                end
+              end
+              default: begin
+                // do nothing otherwise
+              end
+            endcase
           end
           3'b111: begin
-            // AND: AND
+            case (insn_from_imem[31:25])
+              7'b0000000: begin
+                // AND: AND
 
-            rd = insn_rd;
-            rs1 = insn_rs1;
-            rs2 = insn_rs2;
-            rd_data = rs1_data & rs2_data;
-            we = 1;
+                rd = insn_rd;
+                rs1 = insn_rs1;
+                rs2 = insn_rs2;
+                rd_data = rs1_data & rs2_data;
+                we = 1;
+              end
+              7'b0000001: begin
+                // REMU: remainder unsigned
+                div_rs1_input = rs1_data;
+                div_rs2_input = rs2_data;
+                
+                rd  = insn_rd;
+                rs1 = insn_rs1;
+                rs2 = insn_rs2;
+
+                if (rs2_data == 0) begin
+                  rd_data = rs1_data;
+                end else begin
+                  rd_data = o_remainder;
+                end
+
+                we = 1;
+              end
+              default: begin
+                // do nothing otherwise
+              end
+            endcase
           end
         endcase
         // increment PC
