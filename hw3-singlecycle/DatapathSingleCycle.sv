@@ -239,6 +239,7 @@ module DatapathSingleCycle (
   logic [31:0] o_remainder;
   logic [31:0] o_quotient;
   logic [31:0] int_one;
+  logic [31:0] int_jalr;
 
   cla c (
       .a  (cla_a),
@@ -292,6 +293,12 @@ module DatapathSingleCycle (
         we = 1;
 
         // increment PC
+        pcNext = pcCurrent + 32'd4;
+      end
+      OpAuipc: begin
+        rd = insn_rd;
+        rd_data = pcCurrent + {imm_u, 12'b0};
+        we = 1;
         pcNext = pcCurrent + 32'd4;
       end
       OpRegImm: begin
@@ -721,15 +728,18 @@ module DatapathSingleCycle (
       // Possible Issue: Should these next 2 have write enable??
       OpJal: begin
         rd = insn_rd;
-        rd_data = pcCurrent + 4;
+        rd_data = pcCurrent + 32'd4;
         pcNext = pcCurrent + imm_j_sext;
+        we = 1;
       end
       OpJalr: begin
         rd = insn_rd;
         rs1 = insn_rs1;
 
-        rd_data = pcCurrent + 4;
-        pcNext = (rs1_data + imm_i_sext) & ~(32'd1);
+        rd_data = pcCurrent + 32'd4;
+        int_jalr = (rs1_data + imm_i_sext) & ~(32'd1);
+        pcNext = {int_jalr[31:2], 2'b0};
+        we = 1;
       end
       OpLoad: begin
         // case(insn_from_imem[14:12])
@@ -744,7 +754,7 @@ module DatapathSingleCycle (
         // endcase
       end
       OpStore: begin
-
+        
       end
       OpEnviron: begin
         if (insn_from_imem[31:7] == 25'd0) begin
