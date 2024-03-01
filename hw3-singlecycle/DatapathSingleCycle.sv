@@ -222,14 +222,14 @@ module DatapathSingleCycle (
   logic illegal_insn;
 
   logic [4:0] rd, rs1, rs2;
-  logic [31:0] rd_data_inter;
-  logic [31:0] rd_data, rs1_data, rs2_data;
+  logic [`REG_SIZE] rd_data_inter;
+  logic [`REG_SIZE] rd_data, rs1_data, rs2_data;
   logic we;
 
-  logic [31:0] cla_a;
-  logic [31:0] cla_b;
-  logic [31:0] cla_inc_in;
-  logic [31:0] cla_inc_out;
+  logic [`REG_SIZE] cla_a;
+  logic [`REG_SIZE] cla_b;
+  logic [`REG_SIZE] cla_inc_in;
+  logic [`REG_SIZE] cla_inc_out;
   wire [31:0] cla_single = 32'b1;
 
   logic [63:0] mul_result;
@@ -469,12 +469,12 @@ module DatapathSingleCycle (
               we = 1;
             end
             if (insn_from_imem[31:25] == 7'd1) begin
-              // MULHSU: multiply and keep top 32 bits
+              // MULHSU: multiply signed * unsigned and keep top 32 bits
               rd = insn_rd;
               rs1 = insn_rs1;
               rs2 = insn_rs2;
 
-              mul_result = $signed(rs1_data) * $unsigned(rs2_data);
+              mul_result = $signed(rs1_data) * $signed({1'b0, rs2_data});
               rd_data = mul_result[63:32];
 
               we = 1;
@@ -491,7 +491,7 @@ module DatapathSingleCycle (
               we = 1;
             end
             if (insn_from_imem[31:25] == 7'd1) begin
-              // MULHU: multiply and keep top 32 bits
+              // MULHU: multiply unsigned and keep top 32 bits
               rd = insn_rd;
               rs1 = insn_rs1;
               rs2 = insn_rs2;
@@ -742,16 +742,91 @@ module DatapathSingleCycle (
         we = 1;
       end
       OpLoad: begin
-        // case(insn_from_imem[14:12])
-        //   3'b000: begin
-        //     // LB: Load Byte
+        case (insn_from_imem[14:12])
+          3'b000: begin
+            // LB: Load Byte
 
-        //     rd = insn_rd;
-        //     rs1 = insn_rs1;
-        //     addr_to_dmem = rs1_data + imm_i_sext;
-        //     we = 0;
-        //   end
-        // endcase
+            rd = insn_rd;
+            rs1 = insn_rs1;
+            addr_to_dmem = rs1_data + imm_i_sext;
+
+            rd_data = load_data_from_dmem;
+            we = 1;
+          end
+          3'b001: begin
+            // LH: Load half-word
+
+            rd = insn_rd;
+            rs1 = insn_rs1;
+            addr_to_dmem = rs1_data + imm_i_sext;
+
+            rd_data = load_data_from_dmem;
+            we = 1;
+          end
+          3'b010: begin
+            // LW: Load word
+
+            rd = insn_rd;
+            rs1 = insn_rs1;
+            addr_to_dmem = rs1_data + imm_i_sext;
+
+            rd_data = load_data_from_dmem;
+            we = 1;
+          end
+          3'b100: begin
+            // LBU: Load byte unsigned
+
+            rd = insn_rd;
+            rs1 = insn_rs1;
+            addr_to_dmem = rs1_data + imm_i_sext;
+
+            rd_data = load_data_from_dmem;
+            we = 1;
+          end
+          3'b101: begin
+            // LHU: Load half-word unsigned
+
+            rd = insn_rd;
+            rs1 = insn_rs1;
+            addr_to_dmem = rs1_data + imm_i_sext;
+
+            rd_data = load_data_from_dmem;
+            we = 1;
+          end
+          default: begin
+          end
+        endcase
+      end
+      OpStore: begin
+        case (insn_from_imem[14:12])
+          3'b000: begin
+            // SB: Save byte
+
+            rs1 = insn_rs1;
+            addr_to_dmem = rs1_data + imm_i_sext;
+
+            store_we_to_dmem = 4'b0001;
+          end
+          3'b001: begin
+            // SH: Save half-word
+
+            rs1 = insn_rs1;
+            addr_to_dmem = rs1_data + imm_i_sext;
+
+            store_we_to_dmem = 4'b0011;
+          end
+          3'b010: begin
+            // SW: Save word
+            rs1 = insn_rs1;
+            rs2 = insn_rs2;
+            addr_to_dmem = rs1_data + $signed(imm_i_sext);
+
+            store_data_to_dmem = rs2_data;
+            store_we_to_dmem = 4'b1111;
+          end
+          default: begin
+          end
+        endcase
       end
       OpStore: begin
         
