@@ -593,7 +593,7 @@ module DatapathSingleCycle (
           end
           3'b110: begin
             case (insn_from_imem[31:25])
-              7'd0: begin
+              7'b0: begin
                 // OR: OR
 
                 rd = insn_rd;
@@ -602,9 +602,8 @@ module DatapathSingleCycle (
                 rd_data = rs1_data | rs2_data;
                 we = 1;
               end
-              7'b0000001: begin
+              7'b1: begin
                 // REM
-
                 rd  = insn_rd;
                 rs1 = insn_rs1;
                 rs2 = insn_rs2;
@@ -629,6 +628,8 @@ module DatapathSingleCycle (
                   div_rs2_input = rs2_data;
                   rd_data = o_remainder;
                 end
+
+                we = 1;
               end
               default: begin
                 // do nothing otherwise
