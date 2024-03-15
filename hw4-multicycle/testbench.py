@@ -216,6 +216,18 @@ async def testDivu(dut):
     assert dut.datapath.rf.regs[2].value == 1, f'failed at cycle {dut.datapath.cycles_current.value.integer}'
 
 @cocotb.test()
+async def testDiv(dut):
+    "Run div insn"
+    asm(dut, '''
+        addi x1,x0,0xC
+        addi x2,x0,0x4
+        divu x3,x1,x2''')
+    await preTestSetup(dut)
+
+    await ClockCycles(dut.clock_proc, 6)
+    assert dut.datapath.rf.regs[3].value == 3, f'failed at cycle {dut.datapath.cycles_current.value.integer}'
+
+@cocotb.test()
 async def test2Divu(dut):
     "Run back-to-back divu insns"
     asm(dut, '''

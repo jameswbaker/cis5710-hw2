@@ -10,7 +10,7 @@ module left_bitshift (
     input  wire [31:0] in_wire,
     output wire [31:0] out_wire
 );
-    assign out_wire = {in_wire[30:0], 1'b0};
+  assign out_wire = {in_wire[30:0], 1'b0};
 endmodule
 
 // helper module to select the most significant bit of a 32 bit input
@@ -19,7 +19,7 @@ module select_msb (
     input  wire [31:0] in_wire,
     output wire [31:0] out_wire
 );
-    assign out_wire = {31'b0, in_wire[31]};
+  assign out_wire = {31'b0, in_wire[31]};
 endmodule
 
 
@@ -28,29 +28,29 @@ module divider_unsigned (
     input  wire [31:0] i_divisor,
     output wire [31:0] o_remainder,
     output wire [31:0] o_quotient
-);    
+);
 
-    // (32 * 32) + 32 wires
-    wire [1055:0] divd, rem, quot;
+  // (32 * 32) + 32 wires
+  wire [1055:0] divd, rem, quot;
 
-    assign divd[31:0] = i_dividend;
-    assign rem[31:0] = 32'b0;
-    assign quot[31:0] = 32'b0;
+  assign divd[31:0] = i_dividend;
+  assign rem[31:0]  = 32'b0;
+  assign quot[31:0] = 32'b0;
 
-    genvar i;
-    for (i = 0; i < 1024; i = i+32) begin
-        divu_1iter d1iter(
-            .i_dividend(divd[i+31:i]), 
-            .i_divisor(i_divisor), 
-            .i_remainder(rem[i+31:i]), 
-            .i_quotient(quot[i+31:i]), 
-            .o_dividend(divd[i+63:i+32]), 
-            .o_remainder(rem[i+63:i+32]), 
-            .o_quotient(quot[i+63:i+32])
-        );
-    end
-    assign o_remainder = rem[1055:1024];
-    assign o_quotient = quot[1055:1024];
+  genvar i;
+  for (i = 0; i < 1024; i = i + 32) begin
+    divu_1iter d1iter (
+        .i_dividend (divd[i+31:i]),
+        .i_divisor  (i_divisor),
+        .i_remainder(rem[i+31:i]),
+        .i_quotient (quot[i+31:i]),
+        .o_dividend (divd[i+63:i+32]),
+        .o_remainder(rem[i+63:i+32]),
+        .o_quotient (quot[i+63:i+32])
+    );
+  end
+  assign o_remainder = rem[1055:1024];
+  assign o_quotient  = quot[1055:1024];
 
 endmodule
 
@@ -65,21 +65,33 @@ module divu_1iter (
     output wire [31:0] o_quotient
 );
 
-    wire [31:0] rem_s, rem_s2, divd_msb, quot_s;
+  wire [31:0] rem_s, rem_s2, divd_msb, quot_s;
 
-    // Initial remainder update
-    left_bitshift lbs1(.in_wire(i_remainder), .out_wire(rem_s));  // (remainder << 1)
-    select_msb msb(.in_wire(i_dividend), .out_wire(divd_msb));    // (dividend >> 31) & 0x1
-    assign rem_s2 = rem_s | divd_msb; // remainder = (remainder << 1) | ((dividend >> 31) & 0x1)
+  // Initial remainder update
+  left_bitshift lbs1 (
+      .in_wire (i_remainder),
+      .out_wire(rem_s)
+  );  // (remainder << 1)
+  select_msb msb (
+      .in_wire (i_dividend),
+      .out_wire(divd_msb)
+  );  // (dividend >> 31) & 0x1
+  assign rem_s2 = rem_s | divd_msb;  // remainder = (remainder << 1) | ((dividend >> 31) & 0x1)
 
-    // Shifting the quotient regardless
-    left_bitshift lbs2(.in_wire(i_quotient), .out_wire(quot_s));  // quotient = (quotient << 1)
+  // Shifting the quotient regardless
+  left_bitshift lbs2 (
+      .in_wire (i_quotient),
+      .out_wire(quot_s)
+  );  // quotient = (quotient << 1)
 
-    // Calculate outputs dependent on (remainder < divisor)
-    assign o_quotient = (rem_s2 < i_divisor) ? quot_s : quot_s | 32'b1;
-    assign o_remainder = (rem_s2 < i_divisor) ? rem_s2 : rem_s2 - i_divisor;
+  // Calculate outputs dependent on (remainder < divisor)
+  assign o_quotient  = (rem_s2 < i_divisor) ? quot_s : quot_s | 32'b1;
+  assign o_remainder = (rem_s2 < i_divisor) ? rem_s2 : rem_s2 - i_divisor;
 
-    // Shifting the dividend output
-    left_bitshift lbs3(.in_wire(i_dividend), .out_wire(o_dividend));
+  // Shifting the dividend output
+  left_bitshift lbs3 (
+      .in_wire (i_dividend),
+      .out_wire(o_dividend)
+  );
 
 endmodule

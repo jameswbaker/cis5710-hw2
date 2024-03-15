@@ -27,7 +27,38 @@ module RegFile (
     input logic rst
 );
 
-  // TODO: copy your HW3B code here
+  localparam int NumRegs = 32;
+  logic [`REG_SIZE] regs[NumRegs];
+
+  // inputs
+  // rd: destination to write
+  // rd_data: RDestValue (value to write)
+  // rs1: reg. source to read
+  // rs2: reg. source to read
+  // clk: thing that goes on and off regularly, only when clk is on 1 do certain things happen
+  // we: write enable: 1 means write to memory 0 means don't
+  // rst: reset
+
+  // outputs
+  // rs1_data: RSrc1Val to output
+  // rs2_data: RSrc2Val to output
+
+  // Reads
+  assign rs1_data = regs[rs1];  // read from rs1
+  assign rs2_data = regs[rs2];  // read from rs2
+  assign regs[0]  = 32'd0;  // x0 is hardwired to 0
+
+  // Writes
+  // what does always_ff do? It's a clocked always block, meaning it only runs when the clock is 1
+  always_ff @(posedge clk) begin
+    if (rst) begin
+      for (int i = 1; i < NumRegs; i++) begin
+        regs[i] <= 32'd0;  // Reset all registers to 0, except for reg[0]
+      end
+    end else if (we && rd != 5'd0) begin
+      regs[rd] <= rd_data;
+    end
+  end
 
 endmodule
 
@@ -44,7 +75,960 @@ module DatapathMultiCycle (
     output logic [3:0] store_we_to_dmem
 );
 
-  // TODO: your code here (largely based on HW3B)
+  // components of the instruction
+  wire [6:0] insn_funct7;
+  wire [4:0] insn_rs2;
+  wire [4:0] insn_rs1;
+  wire [2:0] insn_funct3;
+  wire [4:0] insn_rd;
+  wire [`OPCODE_SIZE] insn_opcode;
+
+  // split R-type instruction - see section 2.2 of RiscV spec
+  assign {insn_funct7, insn_rs2, insn_rs1, insn_funct3, insn_rd, insn_opcode} = insn_from_imem;
+
+  // setup for I, S, B & J type instructions
+  // I - short immediates and loads
+  wire [11:0] imm_i;
+  assign imm_i = insn_from_imem[31:20];
+  wire [ 4:0] imm_shamt = insn_from_imem[24:20];
+
+  // S - stores
+  wire [11:0] imm_s;
+  assign imm_s[11:5] = insn_funct7, imm_s[4:0] = insn_rd;
+
+  // B - conditionals
+  wire [12:0] imm_b;
+  assign {imm_b[12], imm_b[10:5]} = insn_funct7, {imm_b[4:1], imm_b[11]} = insn_rd, imm_b[0] = 1'b0;
+
+  // J - unconditional jumps
+  wire [20:0] imm_j;
+  assign {imm_j[20], imm_j[10:1], imm_j[11], imm_j[19:12], imm_j[0]} = {
+    insn_from_imem[31:12], 1'b0
+  };
+
+  // U - setup for U type instructions
+  wire [19:0] imm_u;
+  assign imm_u = insn_from_imem[31:12];
+
+  wire [`REG_SIZE] imm_i_sext = {{20{imm_i[11]}}, imm_i[11:0]};
+  wire [`REG_SIZE] imm_s_sext = {{20{imm_s[11]}}, imm_s[11:0]};
+  wire [`REG_SIZE] imm_b_sext = {{19{imm_b[12]}}, imm_b[12:0]};
+  wire [`REG_SIZE] imm_j_sext = {{11{imm_j[20]}}, imm_j[20:0]};
+
+  // opcodes - see section 19 of RiscV spec
+  localparam bit [`OPCODE_SIZE] OpLoad = 7'b00_000_11;
+  localparam bit [`OPCODE_SIZE] OpStore = 7'b01_000_11;
+  localparam bit [`OPCODE_SIZE] OpBranch = 7'b11_000_11;
+  localparam bit [`OPCODE_SIZE] OpJalr = 7'b11_001_11;
+  localparam bit [`OPCODE_SIZE] OpMiscMem = 7'b00_011_11;
+  localparam bit [`OPCODE_SIZE] OpJal = 7'b11_011_11;
+
+  localparam bit [`OPCODE_SIZE] OpRegImm = 7'b00_100_11;
+  localparam bit [`OPCODE_SIZE] OpRegReg = 7'b01_100_11;
+  localparam bit [`OPCODE_SIZE] OpEnviron = 7'b11_100_11;
+
+  localparam bit [`OPCODE_SIZE] OpAuipc = 7'b00_101_11;
+  localparam bit [`OPCODE_SIZE] OpLui = 7'b01_101_11;
+
+  wire insn_lui = insn_opcode == OpLui;
+  wire insn_auipc = insn_opcode == OpAuipc;
+  wire insn_jal = insn_opcode == OpJal;
+  wire insn_jalr = insn_opcode == OpJalr;
+
+  wire insn_beq = insn_opcode == OpBranch && insn_from_imem[14:12] == 3'b000;
+  wire insn_bne = insn_opcode == OpBranch && insn_from_imem[14:12] == 3'b001;
+  wire insn_blt = insn_opcode == OpBranch && insn_from_imem[14:12] == 3'b100;
+  wire insn_bge = insn_opcode == OpBranch && insn_from_imem[14:12] == 3'b101;
+  wire insn_bltu = insn_opcode == OpBranch && insn_from_imem[14:12] == 3'b110;
+  wire insn_bgeu = insn_opcode == OpBranch && insn_from_imem[14:12] == 3'b111;
+
+  wire insn_lb = insn_opcode == OpLoad && insn_from_imem[14:12] == 3'b000;
+  wire insn_lh = insn_opcode == OpLoad && insn_from_imem[14:12] == 3'b001;
+  wire insn_lw = insn_opcode == OpLoad && insn_from_imem[14:12] == 3'b010;
+  wire insn_lbu = insn_opcode == OpLoad && insn_from_imem[14:12] == 3'b100;
+  wire insn_lhu = insn_opcode == OpLoad && insn_from_imem[14:12] == 3'b101;
+
+  wire insn_sb = insn_opcode == OpStore && insn_from_imem[14:12] == 3'b000;
+  wire insn_sh = insn_opcode == OpStore && insn_from_imem[14:12] == 3'b001;
+  wire insn_sw = insn_opcode == OpStore && insn_from_imem[14:12] == 3'b010;
+
+  wire insn_addi = insn_opcode == OpRegImm && insn_from_imem[14:12] == 3'b000;
+  wire insn_slti = insn_opcode == OpRegImm && insn_from_imem[14:12] == 3'b010;
+  wire insn_sltiu = insn_opcode == OpRegImm && insn_from_imem[14:12] == 3'b011;
+  wire insn_xori = insn_opcode == OpRegImm && insn_from_imem[14:12] == 3'b100;
+  wire insn_ori = insn_opcode == OpRegImm && insn_from_imem[14:12] == 3'b110;
+  wire insn_andi = insn_opcode == OpRegImm && insn_from_imem[14:12] == 3'b111;
+
+  wire insn_slli = insn_opcode == OpRegImm && insn_from_imem[14:12] == 3'b001 && insn_from_imem[31:25] == 7'd0;
+  wire insn_srli = insn_opcode == OpRegImm && insn_from_imem[14:12] == 3'b101 && insn_from_imem[31:25] == 7'd0;
+  wire insn_srai = insn_opcode == OpRegImm && insn_from_imem[14:12] == 3'b101 && insn_from_imem[31:25] == 7'b0100000;
+
+  wire insn_add = insn_opcode == OpRegReg && insn_from_imem[14:12] == 3'b000 && insn_from_imem[31:25] == 7'd0;
+  wire insn_sub  = insn_opcode == OpRegReg && insn_from_imem[14:12] == 3'b000 && insn_from_imem[31:25] == 7'b0100000;
+  wire insn_sll = insn_opcode == OpRegReg && insn_from_imem[14:12] == 3'b001 && insn_from_imem[31:25] == 7'd0;
+  wire insn_slt = insn_opcode == OpRegReg && insn_from_imem[14:12] == 3'b010 && insn_from_imem[31:25] == 7'd0;
+  wire insn_sltu = insn_opcode == OpRegReg && insn_from_imem[14:12] == 3'b011 && insn_from_imem[31:25] == 7'd0;
+  wire insn_xor = insn_opcode == OpRegReg && insn_from_imem[14:12] == 3'b100 && insn_from_imem[31:25] == 7'd0;
+  wire insn_srl = insn_opcode == OpRegReg && insn_from_imem[14:12] == 3'b101 && insn_from_imem[31:25] == 7'd0;
+  wire insn_sra  = insn_opcode == OpRegReg && insn_from_imem[14:12] == 3'b101 && insn_from_imem[31:25] == 7'b0100000;
+  wire insn_or = insn_opcode == OpRegReg && insn_from_imem[14:12] == 3'b110 && insn_from_imem[31:25] == 7'd0;
+  wire insn_and = insn_opcode == OpRegReg && insn_from_imem[14:12] == 3'b111 && insn_from_imem[31:25] == 7'd0;
+
+  wire insn_mul    = insn_opcode == OpRegReg && insn_from_imem[31:25] == 7'd1 && insn_from_imem[14:12] == 3'b000;
+  wire insn_mulh   = insn_opcode == OpRegReg && insn_from_imem[31:25] == 7'd1 && insn_from_imem[14:12] == 3'b001;
+  wire insn_mulhsu = insn_opcode == OpRegReg && insn_from_imem[31:25] == 7'd1 && insn_from_imem[14:12] == 3'b010;
+  wire insn_mulhu  = insn_opcode == OpRegReg && insn_from_imem[31:25] == 7'd1 && insn_from_imem[14:12] == 3'b011;
+  wire insn_div    = insn_opcode == OpRegReg && insn_from_imem[31:25] == 7'd1 && insn_from_imem[14:12] == 3'b100;
+  wire insn_divu   = insn_opcode == OpRegReg && insn_from_imem[31:25] == 7'd1 && insn_from_imem[14:12] == 3'b101;
+  wire insn_rem    = insn_opcode == OpRegReg && insn_from_imem[31:25] == 7'd1 && insn_from_imem[14:12] == 3'b110;
+  wire insn_remu   = insn_opcode == OpRegReg && insn_from_imem[31:25] == 7'd1 && insn_from_imem[14:12] == 3'b111;
+
+  wire insn_ecall = insn_opcode == OpEnviron && insn_from_imem[31:7] == 25'd0;
+  wire insn_fence = insn_opcode == OpMiscMem;
+
+  // synthesis translate_off
+  // this code is only for simulation, not synthesis
+  // `include "RvDisassembler.sv"
+  // string disasm_string;
+  // always_comb begin
+  //   disasm_string = rv_disasm(insn_from_imem);
+  // end
+  // // HACK: get disasm_string to appear in GtkWave, which can apparently show only wire/logic...
+  // wire [(8*32)-1:0] disasm_wire;
+  // genvar i;
+  // for (i = 0; i < 32; i = i + 1) begin : gen_disasm
+  //   assign disasm_wire[(((i+1))*8)-1:((i)*8)] = disasm_string[31-i];
+  // end
+  // synthesis translate_on
+
+  // program counter
+  logic [`REG_SIZE] pcNext, pcCurrent;
+  always @(posedge clk) begin
+    if (rst) begin
+      pcCurrent <= 32'd0;
+    end else begin
+      pcCurrent <= pcNext;
+    end
+  end
+  assign pc_to_imem = pcCurrent;
+
+  // cycle/insn_from_imem counters
+  logic [`REG_SIZE] cycles_current, num_insns_current;
+  always @(posedge clk) begin
+    if (rst) begin
+      cycles_current <= 0;
+      num_insns_current <= 0;
+    end else begin
+      cycles_current <= cycles_current + 1;
+      if (!rst) begin
+        num_insns_current <= num_insns_current + 1;
+      end
+    end
+  end
+
+  // Flag that tells us if we're in the middle of a multi cycle instruction
+  logic flag_multi_insn = 0;
+  wire  is_multi = insn_div | insn_divu | insn_rem | insn_remu;
+
+  // Set flag
+  always @(posedge clk) begin
+    if (flag_multi_insn == 0 && is_multi == 1) begin
+      flag_multi_insn <= 1;
+    end else begin
+      flag_multi_insn <= 0;
+    end
+  end
+
+  logic illegal_insn;
+
+  logic [4:0] rd, rs1, rs2;
+  logic [`REG_SIZE] rd_data_inter;
+  logic [`REG_SIZE] rd_data, rs1_data, rs2_data;
+  logic we;
+
+  logic [`REG_SIZE] unaligned_addr_to_dmem;  // Unaligned raw addr to dmem
+
+  logic [`REG_SIZE] cla_a;
+  logic [`REG_SIZE] cla_b;
+  logic [`REG_SIZE] cla_inc_in;
+  logic [`REG_SIZE] cla_inc_out;
+  wire [31:0] cla_single = 32'b1;
+
+  logic [63:0] mul_result;
+
+  logic [31:0] div_rs1_input;
+  logic [31:0] div_rs2_input;
+  logic [31:0] o_remainder;
+  logic [31:0] o_quotient;
+  logic [31:0] int_one;
+  logic [31:0] int_jalr;
+
+  cla c (
+      .a  (cla_a),
+      .b  (cla_b),
+      .cin(1'b0),
+      .sum(rd_data_inter)
+  );
+
+  cla c_inc (
+      .a  (cla_inc_in),
+      .b  (cla_single),
+      .cin(1'b0),
+      .sum(cla_inc_out)
+  );
+
+  divider_unsigned_pipelined unsigned_div (
+      .clk(clk),
+      .rst(rst),
+      .i_dividend(div_rs1_input),
+      .i_divisor(div_rs2_input),
+      .o_remainder(o_remainder),
+      .o_quotient(o_quotient)
+  );
+
+  RegFile rf (
+      .rd(rd),
+      .rd_data(rd_data),
+      .rs1(rs1),
+      .rs1_data(rs1_data),
+      .rs2(rs2),
+      .rs2_data(rs2_data),
+
+      .clk(clk),
+      .we (we),
+      .rst(rst)
+  );
+
+  always_comb begin
+    illegal_insn = 1'b0;
+    halt = 0;
+    store_data_to_dmem = 0;
+    store_we_to_dmem = 4'b0;
+    we = 0;
+
+    case (insn_opcode)
+      OpLui: begin
+        // LUI: Load Upper Immediate
+        // get instruction info
+        // set WE to 1
+        // take rd(5) and use as input to rd in regfile
+        // take imm(20) and left shift by 12
+        // don't do anything with opcode
+
+        rd = insn_rd;
+        rd_data = {imm_u, 12'b0};
+        we = 1;
+
+        // increment PC
+        pcNext = pcCurrent + 32'd4;
+      end
+      OpAuipc: begin
+        rd = insn_rd;
+        rd_data = pcCurrent + {imm_u, 12'b0};
+        we = 1;
+        pcNext = pcCurrent + 32'd4;
+      end
+      OpRegImm: begin
+        case (insn_from_imem[14:12])
+          3'b000: begin
+            // ADDI: Add Immediate
+
+            rd = insn_rd;
+            rs1 = insn_rs1;
+
+            cla_a = rs1_data;
+            cla_b = imm_i_sext;
+            rd_data = rd_data_inter;
+
+            we = 1;
+          end
+          3'b010: begin
+            // SLTI: Set Less Than Immediate
+
+            rd = insn_rd;
+            rs1 = insn_rs1;
+            rd_data = $signed(rs1_data) < $signed(imm_i_sext) ? 1 : 0;  // TODO: sign rs1_data?
+            we = 1;
+          end
+          3'b011: begin
+            // SLTIU: Set Less Than Immediate Unsigned
+
+            rd = insn_rd;
+            rs1 = insn_rs1;
+
+            rd_data = $unsigned(rs1_data) < $unsigned(imm_i_sext) ? 1 : 0;
+            we = 1;
+          end
+          3'b100: begin
+            // XORI: XOR Immediate
+
+            rd = insn_rd;
+            rs1 = insn_rs1;
+            rd_data = rs1_data ^ imm_i_sext;
+            we = 1;
+          end
+          3'b110: begin
+            // ORI: OR Immediate
+
+            rd = insn_rd;
+            rs1 = insn_rs1;
+            rd_data = rs1_data | imm_i_sext;
+            we = 1;
+          end
+          3'b111: begin
+            // ANDI: AND Immediate
+
+            rd = insn_rd;
+            rs1 = insn_rs1;
+            rd_data = rs1_data & imm_i_sext;
+            we = 1;
+          end
+
+          3'b001: begin
+            // SLLI: Shift Left Logical Immediate
+
+            rd = insn_rd;
+            rs1 = insn_rs1;
+            rd_data = rs1_data << imm_i[4:0];
+            we = 1;
+          end
+          3'b101: begin
+            case (insn_from_imem[31:25])
+              7'b0000000: begin
+                // SRLI: Shift Right Logical Immediate
+
+                rd = insn_rd;
+                rs1 = insn_rs1;
+                rd_data = rs1_data >> imm_i[4:0];
+                we = 1;
+              end
+              7'b0100000: begin
+                // SRAI: Shift Right Arithmetic Immediate
+
+                rd = insn_rd;
+                rs1 = insn_rs1;
+                rd_data = $signed(rs1_data) >>> imm_i[4:0];
+                we = 1;
+              end
+              default: begin
+                // do nothing otherwise
+              end
+            endcase
+          end
+
+        endcase
+        // increment PC
+        pcNext = pcCurrent + 32'd4;
+      end
+      OpRegReg: begin
+        case (insn_from_imem[14:12])
+          3'b000: begin
+            case (insn_from_imem[31:25])
+              7'd0: begin
+                // ADD: Add
+                rd = insn_rd;
+                rs1 = insn_rs1;
+                rs2 = insn_rs2;
+
+                cla_a = rs1_data;
+                cla_b = rs2_data;
+                rd_data = rd_data_inter;
+
+                we = 1;
+              end
+              7'd1: begin
+                // MUL: multiply, only keeping the lower 32 bits
+                rd = insn_rd;
+                rs1 = insn_rs1;
+                rs2 = insn_rs2;
+
+                rd_data = rs1_data * rs2_data;
+
+                we = 1;
+              end
+              7'b0100000: begin
+                // SUB: Subtract
+                rd = insn_rd;
+                rs1 = insn_rs1;
+                rs2 = insn_rs2;
+
+                cla_a = rs1_data;
+                cla_inc_in = ~rs2_data;  // invert all the bits
+                cla_b = cla_inc_out;  // add 1
+                rd_data = rd_data_inter;
+
+                we = 1;
+              end
+              default: begin
+                // do nothing otherwise
+              end
+            endcase
+          end
+          3'b001: begin
+            if (insn_from_imem[31:25] == 7'd0) begin
+              // SLL: shift left unsigned
+              rd = insn_rd;
+              rs1 = insn_rs1;
+              rs2 = insn_rs2;
+              rd_data = rs1_data << rs2_data[4:0];
+              we = 1;
+            end
+            if (insn_from_imem[31:25] == 7'd1) begin
+              // MULH: multiply and keep top 32 bits
+              rd = insn_rd;
+              rs1 = insn_rs1;
+              rs2 = insn_rs2;
+
+              mul_result = $signed(rs1_data) * $signed(rs2_data);
+              rd_data = mul_result[63:32];
+
+              we = 1;
+            end
+          end
+          3'b010: begin
+            if (insn_from_imem[31:25] == 7'd0) begin
+              // SLT: Set Less Than
+
+              rd = insn_rd;
+              rs1 = insn_rs1;
+              rs2 = insn_rs2;
+              rd_data = $signed(rs1_data) < $signed(rs2_data) ? 1 : 0;  // TODO: CHECK (signed?)
+              we = 1;
+            end
+            if (insn_from_imem[31:25] == 7'd1) begin
+              // MULHSU: multiply signed * unsigned and keep top 32 bits
+              rd = insn_rd;
+              rs1 = insn_rs1;
+              rs2 = insn_rs2;
+
+              mul_result = $signed(rs1_data) * $signed({1'b0, rs2_data});
+              rd_data = mul_result[63:32];
+
+              we = 1;
+            end
+          end
+          3'b011: begin
+            if (insn_from_imem[31:25] == 7'd0) begin
+              // SLTU: Set Less Than Unsigned
+
+              rd = insn_rd;
+              rs1 = insn_rs1;
+              rs2 = insn_rs2;
+              rd_data = $unsigned(rs1_data) < $unsigned(rs2_data) ? 1 : 0;
+              we = 1;
+            end
+            if (insn_from_imem[31:25] == 7'd1) begin
+              // MULHU: multiply unsigned and keep top 32 bits
+              rd = insn_rd;
+              rs1 = insn_rs1;
+              rs2 = insn_rs2;
+
+              mul_result = $unsigned(rs1_data) * $unsigned(rs2_data);
+              rd_data = mul_result[63:32];
+
+              we = 1;
+            end
+          end
+          3'b100: begin
+            if (insn_from_imem[31:25] == 7'd0) begin
+              // XOR: shift left unsigned
+              rd = insn_rd;
+              rs1 = insn_rs1;
+              rs2 = insn_rs2;
+              rd_data = rs1_data ^ rs2_data;
+              we = 1;
+            end
+            if (insn_from_imem[31:25] == 7'd1) begin
+              // DIV: divide
+
+              rd  = insn_rd;
+              rs1 = insn_rs1;
+              rs2 = insn_rs2;
+
+              if (rs2_data == 0) begin
+                int_one = 1;
+                rd_data = ~int_one + 1;
+              end else if (rs1_data[31] == 1 && rs2_data[31] == 0) begin
+                if (flag_multi_insn == 0) begin
+                  div_rs1_input = ~rs1_data + 1;
+                  div_rs2_input = rs2_data;
+                end else begin
+                  rd_data = ~o_quotient + 1;
+                end
+              end else if (rs1_data[31] == 0 && rs2_data[31] == 1) begin
+                // o_quotient is unsigned, so we need to change it to be negative since in these cases quotient is negative
+                if (flag_multi_insn == 0) begin
+                  div_rs1_input = rs1_data;
+                  div_rs2_input = ~rs2_data + 1;
+                end else begin
+                  rd_data = ~o_quotient + 1;
+                end
+              end else if (rs1_data[31] == 1 && rs2_data[31] == 1) begin
+                if (flag_multi_insn == 0) begin
+                  div_rs1_input = ~rs1_data + 1;
+                  div_rs2_input = ~rs2_data + 1;
+                end else begin
+                  rd_data = o_quotient;
+                end
+              end else begin
+                if (flag_multi_insn == 0) begin
+                  div_rs1_input = rs1_data;
+                  div_rs2_input = rs2_data;
+                end else begin
+                  rd_data = o_quotient;
+                end
+              end
+
+              we = 1;
+            end
+          end
+          3'b101: begin
+            case (insn_from_imem[31:25])
+              7'd0: begin
+                // SRL: Shift Right Logical
+
+                rd = insn_rd;
+                rs1 = insn_rs1;
+                rs2 = insn_rs2;
+                rd_data = rs1_data >> rs2_data[4:0];
+                we = 1;
+              end
+              7'b0100000: begin
+                // SRA: Shift Right Arithmetic
+
+                rd = insn_rd;
+                rs1 = insn_rs1;
+                rs2 = insn_rs2;
+                rd_data = $signed(rs1_data) >>> rs2_data[4:0];
+                we = 1;
+              end
+              7'b0000001: begin
+                rd  = insn_rd;
+                rs1 = insn_rs1;
+                rs2 = insn_rs2;
+
+                // DIVU: divide unsigned
+                if (flag_multi_insn == 0) begin
+                  div_rs1_input = rs1_data;
+                  div_rs2_input = rs2_data;
+                end else begin
+                  if (rs2_data == 0) begin
+                    int_one = 1;
+                    rd_data = ~int_one + 1;
+                  end else begin
+                    rd_data = o_quotient;
+                  end
+                end
+
+                we = 1;
+              end
+              default: begin
+                // do nothing otherwise
+              end
+            endcase
+          end
+          3'b110: begin
+            case (insn_from_imem[31:25])
+              7'b0: begin
+                // OR: OR
+
+                rd = insn_rd;
+                rs1 = insn_rs1;
+                rs2 = insn_rs2;
+                rd_data = rs1_data | rs2_data;
+                we = 1;
+              end
+              7'b1: begin
+                // REM
+                rd  = insn_rd;
+                rs1 = insn_rs1;
+                rs2 = insn_rs2;
+
+                if (rs2_data == 0) begin
+                  rd_data = rs1_data;
+                end else if (rs1_data[31] == 1 && rs2_data[31] == 0) begin
+                  if (flag_multi_insn == 0) begin
+                    div_rs1_input = ~rs1_data + 1;
+                    div_rs2_input = rs2_data;
+                  end else begin
+                    rd_data = ~o_remainder + 1;
+                  end
+                end else if (rs1_data[31] == 0 && rs2_data[31] == 1) begin
+                  // o_quotient is unsigned, so we need to change it to be negative since in these cases quotient is negative
+                  if (flag_multi_insn == 0) begin
+                    div_rs1_input = rs1_data;
+                    div_rs2_input = ~rs2_data + 1;
+                  end else begin
+                    rd_data = o_remainder;
+                  end
+                end else if (rs1_data[31] == 1 && rs2_data[31] == 1) begin
+                  if (flag_multi_insn == 0) begin
+                    div_rs1_input = ~rs1_data + 1;
+                    div_rs2_input = ~rs2_data + 1;
+                  end else begin
+                    rd_data = ~o_remainder + 1;
+                  end
+                end else begin
+                  if (flag_multi_insn == 0) begin
+                    div_rs1_input = rs1_data;
+                    div_rs2_input = rs2_data;
+                  end else begin
+                    rd_data = o_remainder;
+                  end
+                end
+
+                we = 1;
+              end
+              default: begin
+                // do nothing otherwise
+              end
+            endcase
+          end
+          3'b111: begin
+            case (insn_from_imem[31:25])
+              7'b0000000: begin
+                // AND: AND
+
+                rd = insn_rd;
+                rs1 = insn_rs1;
+                rs2 = insn_rs2;
+                rd_data = rs1_data & rs2_data;
+                we = 1;
+              end
+              7'b0000001: begin
+                // REMU: remainder unsigned
+                rd  = insn_rd;
+                rs1 = insn_rs1;
+                rs2 = insn_rs2;
+
+                if (flag_multi_insn == 0) begin
+                  div_rs1_input = rs1_data;
+                  div_rs2_input = rs2_data;
+                end else begin
+                  if (rs2_data == 0) begin
+                    rd_data = rs1_data;
+                  end else begin
+                    rd_data = o_remainder;
+                  end
+                end
+
+                we = 1;
+              end
+              default: begin
+                // do nothing otherwise
+              end
+            endcase
+          end
+        endcase
+        // Increment PC (unless we're in the middle of a multi-cycle instruction)
+        if (flag_multi_insn == 1) begin
+          pcNext = pcCurrent;
+        end else begin
+          pcNext = pcCurrent + 32'd4;
+        end
+      end
+      OpBranch: begin
+        rs1 = insn_rs1;
+        rs2 = insn_rs2;
+
+        case (insn_from_imem[14:12])
+          3'b000: begin
+            // BEQ: Branch if Equal
+            if (rs1_data == rs2_data) begin
+              pcNext = pcCurrent + imm_b_sext;
+            end else begin
+              pcNext = pcCurrent + 32'd4;
+            end
+          end
+          3'b001: begin
+            // BNE: Branch if Not Equal
+            if (rs1_data != rs2_data) begin
+              pcNext = pcCurrent + imm_b_sext;
+            end else begin
+              pcNext = pcCurrent + 32'd4;
+            end
+          end
+          3'b100: begin
+            // BLT: Branch if Less Than
+            if ($signed(rs1_data) < $signed(rs2_data)) begin
+              pcNext = pcCurrent + imm_b_sext;
+            end else begin
+              pcNext = pcCurrent + 32'd4;
+            end
+          end
+          3'b101: begin
+            // BGE: Branch if Greater Than or Equal
+            if ($signed(rs1_data) >= $signed(rs2_data)) begin
+              pcNext = pcCurrent + imm_b_sext;
+            end else begin
+              pcNext = pcCurrent + 32'd4;
+            end
+          end
+          3'b110: begin
+            // BLTU: Branch if Less Than Unsigned
+            if ($unsigned(rs1_data) < $unsigned(rs2_data)) begin
+              pcNext = pcCurrent + imm_b_sext;
+            end else begin
+              pcNext = pcCurrent + 32'd4;
+            end
+          end
+          3'b111: begin
+            // BGEU: Branch if Greater Than or Equal Unsigned
+            if ($unsigned(rs1_data) >= $unsigned(rs2_data)) begin
+              pcNext = pcCurrent + imm_b_sext;
+            end else begin
+              pcNext = pcCurrent + 32'd4;
+            end
+          end
+          default: begin
+            // do nothing ig
+          end
+        endcase
+      end
+      // Possible Issue: Should these next 2 have write enable??
+      OpJal: begin
+        rd = insn_rd;
+        rd_data = pcCurrent + 32'd4;
+        pcNext = pcCurrent + imm_j_sext;
+        we = 1;
+      end
+      OpJalr: begin
+        rd = insn_rd;
+        rs1 = insn_rs1;
+
+        rd_data = pcCurrent + 32'd4;
+        int_jalr = (rs1_data + imm_i_sext) & ~(32'd1);
+        pcNext = {int_jalr[31:2], 2'b0};
+        we = 1;
+      end
+      OpLoad: begin
+        case (insn_from_imem[14:12])
+          3'b000: begin
+            // LB: Load Byte
+            rd = insn_rd;
+            rs1 = insn_rs1;
+            we = 1;
+
+            // Set address
+            unaligned_addr_to_dmem = $signed(rs1_data) + $signed(imm_i_sext);
+            addr_to_dmem = {unaligned_addr_to_dmem[31:2], 2'b0};
+
+            // Choose which byte of the loaded word to take
+            // We also need to sign-extend our result manually
+            case (unaligned_addr_to_dmem[1:0])
+              2'b00: begin
+                rd_data = {{24{load_data_from_dmem[7]}}, load_data_from_dmem[7:0]};
+              end
+              2'b01: begin
+                rd_data = {{24{load_data_from_dmem[15]}}, load_data_from_dmem[15:8]};
+              end
+              2'b10: begin
+                rd_data = {{24{load_data_from_dmem[23]}}, load_data_from_dmem[23:16]};
+              end
+              2'b11: begin
+                rd_data = {{24{load_data_from_dmem[31]}}, load_data_from_dmem[31:24]};
+              end
+              default: begin
+              end
+            endcase
+          end
+          3'b001: begin
+            // LH: Load half-word
+            rd = insn_rd;
+            rs1 = insn_rs1;
+
+            // Set address
+            unaligned_addr_to_dmem = $signed(rs1_data) + $signed(imm_i_sext);
+
+            // Only allow valid addresses (last bit must be 0)
+            if (unaligned_addr_to_dmem[0] == 0) begin
+              we = 1;
+              addr_to_dmem = {unaligned_addr_to_dmem[31:2], 2'b0};
+
+              // Choose which byte of the loaded word to take
+              // We also need to sign-extend our result manually
+              case (unaligned_addr_to_dmem[1])
+                1'b0: begin
+                  rd_data = {{16{load_data_from_dmem[15]}}, load_data_from_dmem[15:0]};
+                end
+                1'b1: begin
+                  rd_data = {{16{load_data_from_dmem[31]}}, load_data_from_dmem[31:16]};
+                end
+                default: begin
+                end
+              endcase
+            end
+          end
+          3'b010: begin
+            // LW: Load word
+            rd = insn_rd;
+            rs1 = insn_rs1;
+            unaligned_addr_to_dmem = $signed(rs1_data) + $signed(imm_i_sext);
+
+            // Only allow valid addresses (last two bits must be 0)
+            if (unaligned_addr_to_dmem[1:0] == 2'b0) begin
+              we = 1;
+              addr_to_dmem = unaligned_addr_to_dmem;
+              rd_data = load_data_from_dmem;
+            end
+          end
+          3'b100: begin
+            // LBU: Load byte unsigned
+            rd = insn_rd;
+            rs1 = insn_rs1;
+            we = 1;
+
+            // Set address
+            unaligned_addr_to_dmem = $signed(rs1_data) + $signed(imm_i_sext);
+            addr_to_dmem = {unaligned_addr_to_dmem[31:2], 2'b0};
+
+            // Choose which byte of the loaded word to take
+            // We also need to ZERO-extend our result manually
+            case (unaligned_addr_to_dmem[1:0])
+              2'b00: begin
+                rd_data = {24'b0, load_data_from_dmem[7:0]};
+              end
+              2'b01: begin
+                rd_data = {24'b0, load_data_from_dmem[15:8]};
+              end
+              2'b10: begin
+                rd_data = {24'b0, load_data_from_dmem[23:16]};
+              end
+              2'b11: begin
+                rd_data = {24'b0, load_data_from_dmem[31:24]};
+              end
+              default: begin
+              end
+            endcase
+          end
+          3'b101: begin
+            // LHU: Load half-word unsigned
+            rd = insn_rd;
+            rs1 = insn_rs1;
+
+            // Set address
+            unaligned_addr_to_dmem = $signed(rs1_data) + $signed(imm_i_sext);
+
+            // Only allow valid addresses (last bit must be 0)
+            if (unaligned_addr_to_dmem[0] == 0) begin
+              we = 1;
+              addr_to_dmem = {unaligned_addr_to_dmem[31:2], 2'b0};
+
+              // Choose which byte of the loaded word to take
+              // We also need to ZERO-extend our result manually
+              case (unaligned_addr_to_dmem[1])
+                1'b0: begin
+                  rd_data = {16'b0, load_data_from_dmem[15:0]};
+                end
+                1'b1: begin
+                  rd_data = {16'b0, load_data_from_dmem[31:16]};
+                end
+                default: begin
+                end
+              endcase
+            end
+          end
+          default: begin
+          end
+        endcase
+
+        // increment PC
+        pcNext = pcCurrent + 32'd4;
+      end
+      OpStore: begin
+        case (insn_from_imem[14:12])
+          3'b000: begin
+            // SB: Save byte
+            rs1 = insn_rs1;
+            rs2 = insn_rs2;
+
+            // Set address
+            unaligned_addr_to_dmem = $signed(rs1_data) + $signed(imm_s_sext);
+            addr_to_dmem = {unaligned_addr_to_dmem[31:2], 2'b0};
+
+            // Choose which byte to store in this word
+            case (unaligned_addr_to_dmem[1:0])
+              2'b00: begin
+                store_we_to_dmem   = 4'b0001;
+                store_data_to_dmem = {24'b0, rs2_data[7:0]};
+              end
+              2'b01: begin
+                store_we_to_dmem   = 4'b0010;
+                store_data_to_dmem = {16'b0, rs2_data[7:0], 8'b0};
+              end
+              2'b10: begin
+                store_we_to_dmem   = 4'b0100;
+                store_data_to_dmem = {8'b0, rs2_data[7:0], 16'b0};
+              end
+              2'b11: begin
+                store_we_to_dmem   = 4'b1000;
+                store_data_to_dmem = {rs2_data[7:0], 24'b0};
+              end
+              default: begin
+              end
+            endcase
+          end
+          3'b001: begin
+            // SH: Save half-word
+            rs1 = insn_rs1;
+            rs2 = insn_rs2;
+
+            // Set address
+            unaligned_addr_to_dmem = $signed(rs1_data) + $signed(imm_s_sext);
+            addr_to_dmem = {unaligned_addr_to_dmem[31:2], 2'b0};
+
+            if (unaligned_addr_to_dmem[0] == 0) begin
+              // Choose which byte to store in this word
+              case (unaligned_addr_to_dmem[1])
+                1'b0: begin
+                  store_we_to_dmem   = 4'b0011;
+                  store_data_to_dmem = {16'b0, rs2_data[15:0]};
+                end
+                1'b1: begin
+                  store_we_to_dmem   = 4'b1100;
+                  store_data_to_dmem = {rs2_data[15:0], 16'b0};
+                end
+                default: begin
+                end
+              endcase
+            end
+          end
+          3'b010: begin
+            // SW: Save word
+            rs1 = insn_rs1;
+            rs2 = insn_rs2;
+
+            // Set address
+            unaligned_addr_to_dmem = $signed(rs1_data) + $signed(imm_s_sext);
+
+            if (unaligned_addr_to_dmem[1:0] == 2'b0) begin
+              addr_to_dmem = unaligned_addr_to_dmem;
+              store_we_to_dmem = 4'b1111;
+              store_data_to_dmem = rs2_data;
+            end
+          end
+          default: begin
+          end
+        endcase
+
+        // increment PC
+        pcNext = pcCurrent + 32'd4;
+      end
+      OpMiscMem: begin
+        // NOP
+        pcNext = pcCurrent + 32'd4;
+      end
+      OpEnviron: begin
+        if (insn_from_imem[31:7] == 25'd0) begin
+          // ECALL: Environment Call
+          halt = 1;
+        end
+      end
+      default: begin
+        illegal_insn = 1'b1;
+      end
+    endcase
+  end
 
 endmodule
 
@@ -147,16 +1131,16 @@ module RiscvProcessor (
   MemorySingleCycle #(
       .NUM_WORDS(8192)
   ) mem (
-      .rst      (rst),
-      .clock_mem (clock_mem),
+      .rst                (rst),
+      .clock_mem          (clock_mem),
       // imem is read-only
-      .pc_to_imem(pc_to_imem),
-      .insn_from_imem(insn_from_imem),
+      .pc_to_imem         (pc_to_imem),
+      .insn_from_imem     (insn_from_imem),
       // dmem is read-write
-      .addr_to_dmem(mem_data_addr),
+      .addr_to_dmem       (mem_data_addr),
       .load_data_from_dmem(mem_data_loaded_value),
       .store_data_to_dmem (mem_data_to_write),
-      .store_we_to_dmem  (mem_data_we)
+      .store_we_to_dmem   (mem_data_we)
   );
 
   DatapathMultiCycle datapath (
