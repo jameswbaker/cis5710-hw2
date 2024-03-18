@@ -186,6 +186,7 @@ module DatapathMultiCycle (
   wire insn_ecall = insn_opcode == OpEnviron && insn_from_imem[31:7] == 25'd0;
   wire insn_fence = insn_opcode == OpMiscMem;
 
+  // TODO: fix this later
   // synthesis translate_off
   // this code is only for simulation, not synthesis
   // `include "RvDisassembler.sv"
@@ -206,6 +207,9 @@ module DatapathMultiCycle (
   always @(posedge clk) begin
     if (rst) begin
       pcCurrent <= 32'd0;
+      // If we're in the middle of a multi-cycle insn, then we should NOT increment the PC
+    end else if (flag_multi_insn == 0 && is_multi == 1) begin
+      pcCurrent <= pcCurrent;
     end else begin
       pcCurrent <= pcNext;
     end
@@ -229,6 +233,8 @@ module DatapathMultiCycle (
   // Flag that tells us if we're in the middle of a multi cycle instruction
   logic flag_multi_insn = 0;
   wire  is_multi = insn_div | insn_divu | insn_rem | insn_remu;
+
+  // pc next should always be pc current + 4
 
   // Set flag
   always @(posedge clk) begin
@@ -720,12 +726,7 @@ module DatapathMultiCycle (
             endcase
           end
         endcase
-        // Increment PC (unless we're in the middle of a multi-cycle instruction)
-        if (flag_multi_insn == 1) begin
-          pcNext = pcCurrent;
-        end else begin
-          pcNext = pcCurrent + 32'd4;
-        end
+        pcNext = pcCurrent + 32'd4;
       end
       OpBranch: begin
         rs1 = insn_rs1;
