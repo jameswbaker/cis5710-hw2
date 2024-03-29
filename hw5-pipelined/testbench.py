@@ -194,6 +194,26 @@ async def testLuiLui(dut):
     assert dut.datapath.rf.regs[2].value == 0x6789A000, f'failed at cycle {dut.datapath.cycles_current.value.integer}'
 
 @cocotb.test()
+async def testAddi(dut):
+    "Run one addi insn"
+    asm(dut, 'addi x1,x0,9')
+    await preTestSetup(dut)
+
+    await ClockCycles(dut.clk, 6)
+    assert dut.datapath.rf.regs[1].value == 9, f'failed at cycle {dut.datapath.cycles_current.value.integer}'
+
+@cocotb.test()
+async def testLuiAddi(dut):
+    "Run two insns to check PC incrementing"
+    asm(dut, '''
+        lui x1,0x12345
+        addi x1,x1,0x678''')
+    await preTestSetup(dut)
+
+    await ClockCycles(dut.clk, 7)
+    assert dut.datapath.rf.regs[1].value == 0x12345678, f'failed at cycle {dut.datapath.cycles_current.value.integer}'
+
+@cocotb.test()
 async def testMX1(dut):
     "Check MX bypass to rs1"
     asm(dut, '''

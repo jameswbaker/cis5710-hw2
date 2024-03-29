@@ -121,6 +121,7 @@ typedef struct packed {
   logic [4:0] rd;
 
   logic [19:0] imm_u;
+  logic [`REG_SIZE] imm_i_sext;
 
   logic insn_lui;
   logic insn_auipc;
@@ -180,7 +181,7 @@ typedef struct packed {
   logic [4:0] rd;
   logic [`REG_SIZE] rd_data;
 
-  logic insn_lui;
+  logic we;
 } stage_memory_t;
 
 /** writeback state **/
@@ -192,7 +193,7 @@ typedef struct packed {
   logic [4:0] rd;
   logic [`REG_SIZE] rd_data;
 
-  logic insn_lui;
+  logic we;
 } stage_writeback_t;
 
 
@@ -449,6 +450,7 @@ module DatapathPipelined (
           rd: 0,
 
           imm_u: 0,
+          imm_i_sext: 0,
 
           insn_lui: 0,
           insn_auipc: 0,
@@ -510,6 +512,7 @@ module DatapathPipelined (
             rd: d_insn_rd,
 
             imm_u: d_imm_u,
+            imm_i_sext: d_imm_i_sext,
 
             insn_lui: d_insn_lui,
             insn_auipc: d_insn_auipc,
@@ -577,13 +580,14 @@ module DatapathPipelined (
   // EXECUTE: Modules Used
   // // //
 
-  logic [4:0] x_rd;
+  logic [4:0] x_rs1, x_rd;
   logic [`REG_SIZE] x_rd_data_inter;
   logic [`REG_SIZE] x_rd_data, x_rs1_data, x_rs2_data;
+  logic x_we;
 
   logic [`REG_SIZE] x_cla_a, x_cla_b;
 
-  cla m_cla (
+  cla x_cla (
       .a  (x_cla_a),
       .b  (x_cla_b),
       .cin(1'b0),
@@ -599,9 +603,27 @@ module DatapathPipelined (
     if (execute_state.insn_lui == 1) begin
       x_rd = execute_state.rd;
       x_rd_data = {execute_state.imm_u, 12'b0};
+      x_we = 1;
     end else begin
       x_rd = 0;
       x_rd_data = 0;
+      x_we = 1;
+    end
+
+    if (execute_state.insn_addi == 1) begin
+      x_cla_a = x_rs1_data;
+      x_cla_b = execute_state.imm_i_sext;
+
+      x_rd = execute_state.rd;
+      x_rd_data = x_rd_data_inter;
+      x_we = 1;
+    end else begin
+      x_cla_a = 0;
+      x_cla_b = 0;
+
+      x_rd = 0;
+      x_rd_data = 0;
+      x_we = 0;
     end
 
     // More instructions here...
@@ -615,16 +637,7 @@ module DatapathPipelined (
   stage_memory_t memory_state;
   always_ff @(posedge clk) begin
     if (rst) begin
-      memory_state <= '{
-          pc: 0,
-          insn: 0,
-          cycle_status: CYCLE_RESET,
-
-          rd: 0,
-          rd_data: 0,
-
-          insn_lui: execute_state.insn_lui
-      };
+      memory_state <= '{pc: 0, insn: 0, cycle_status: CYCLE_RESET, rd: 0, rd_data: 0, we: 0};
     end else begin
       begin
         memory_state <= '{
@@ -635,7 +648,7 @@ module DatapathPipelined (
             rd: x_rd,
             rd_data: x_rd_data,
 
-            insn_lui: execute_state.insn_lui
+            we: x_we
         };
       end
     end
@@ -663,7 +676,7 @@ module DatapathPipelined (
           rd: 0,
           rd_data: 0,
 
-          insn_lui: 0
+          we: memory_state.we
       };
     end else begin
       begin
@@ -675,7 +688,7 @@ module DatapathPipelined (
             rd: memory_state.rd,
             rd_data: memory_state.rd_data,
 
-            insn_lui: memory_state.insn_lui
+            we: memory_state.we
         };
       end
     end
@@ -693,9 +706,9 @@ module DatapathPipelined (
 
   always_comb begin
 
-    if (writeback_state.insn_lui == 1) begin
+    if (writeback_state.we == 1) begin
       w_rd_data = writeback_state.rd_data;
-      w_we = 1;
+      w_we = writeback_state.we;
     end else begin
       w_rd_data = 0;
       w_we = 0;
