@@ -52,10 +52,24 @@ module RegFile (
     input logic rst
 );
   localparam int NumRegs = 32;
-  genvar i;
   logic [`REG_SIZE] regs[NumRegs];
 
-  // TODO: your code here
+  // Reads
+  assign rs1_data = regs[rs1];  // read from rs1
+  assign rs2_data = regs[rs2];  // read from rs2
+  assign regs[0]  = 32'd0;  // x0 is hardwired to 0
+
+  // Writes
+  // what does always_ff do? It's a clocked always block, meaning it only runs when the clock is 1
+  always_ff @(posedge clk) begin
+    if (rst) begin
+      for (int i = 1; i < NumRegs; i++) begin
+        regs[i] <= 32'd0;  // Reset all registers to 0, except for reg[0]
+      end
+    end else if (we && rd != 5'd0) begin
+      regs[rd] <= rd_data;
+    end
+  end
 
 endmodule
 
@@ -84,9 +98,9 @@ typedef enum {
   /** a stall cycle that arose from a load-to-use stall */
   CYCLE_LOAD2USE = 8,
   /** a stall cycle that arose from a div/rem-to-use stall */
-  CYCLE_DIV2USE = 16,
+  CYCLE_DIV2USE  = 16,
   /** a stall cycle that arose from a fence.i insn */
-  CYCLE_FENCEI = 32
+  CYCLE_FENCEI   = 32
 } cycle_status_e;
 
 /** state at the start of Decode stage */
@@ -95,6 +109,91 @@ typedef struct packed {
   logic [`INSN_SIZE] insn;
   cycle_status_e cycle_status;
 } stage_decode_t;
+
+/** execute state **/
+typedef struct packed {
+  logic [`REG_SIZE] pc;
+  logic [`INSN_SIZE] insn;
+  cycle_status_e cycle_status;
+
+  logic [4:0] rs1;
+  logic [4:0] rs2;
+  logic [4:0] rd;
+
+  logic [19:0] imm_u;
+
+  logic insn_lui;
+  logic insn_auipc;
+  logic insn_jal;
+  logic insn_jalr;
+  logic insn_beq;
+  logic insn_bne;
+  logic insn_blt;
+  logic insn_bge;
+  logic insn_bltu;
+  logic insn_bgeu;
+  logic insn_lb;
+  logic insn_lh;
+  logic insn_lw;
+  logic insn_lbu;
+  logic insn_lhu;
+  logic insn_sb;
+  logic insn_sh;
+  logic insn_sw;
+  logic insn_addi;
+  logic insn_slti;
+  logic insn_sltiu;
+  logic insn_xori;
+  logic insn_ori;
+  logic insn_andi;
+  logic insn_slli;
+  logic insn_srli;
+  logic insn_srai;
+  logic insn_add;
+  logic insn_sub;
+  logic insn_sll;
+  logic insn_slt;
+  logic insn_sltu;
+  logic insn_xor;
+  logic insn_srl;
+  logic insn_sra;
+  logic insn_or;
+  logic insn_and;
+  logic insn_mul;
+  logic insn_mulh;
+  logic insn_mulhsu;
+  logic insn_mulhu;
+  logic insn_div;
+  logic insn_divu;
+  logic insn_rem;
+  logic insn_remu;
+  logic insn_ecall;
+  logic insn_fence;
+} stage_execute_t;
+
+/** memory state **/
+typedef struct packed {
+  logic [`REG_SIZE] pc;
+  logic [`INSN_SIZE] insn;
+  cycle_status_e cycle_status;
+
+  logic [4:0] rd;
+  logic [`REG_SIZE] rd_data;
+
+  logic insn_lui;
+} stage_memory_t;
+
+/** writeback state **/
+typedef struct packed {
+  logic [`REG_SIZE] pc;
+  logic [`INSN_SIZE] insn;
+  cycle_status_e cycle_status;
+
+  logic [4:0] rd;
+  logic [`REG_SIZE] rd_data;
+
+  logic insn_lui;
+} stage_writeback_t;
 
 
 module DatapathPipelined (
@@ -118,20 +217,40 @@ module DatapathPipelined (
     output cycle_status_e trace_writeback_cycle_status
 );
 
+  /***********/
+  /* MODULES */
+  /***********/
+
+  // The insn in the execute stage is READING from
+  // the register file, while the insn in the writeback stage
+  // is WRITING to the register file
+  RegFile rf (
+      .rd(writeback_state.rd),
+      .rd_data(w_rd_data),
+      .rs1(execute_state.rs1),
+      .rs1_data(x_rs1_data),
+      .rs2(execute_state.rs2),
+      .rs2_data(x_rs2_data),
+
+      .clk(clk),
+      .we (w_we),
+      .rst(rst)
+  );
+
   // opcodes - see section 19 of RiscV spec
-  localparam bit [`OPCODE_SIZE] OpcodeLoad = 7'b00_000_11;
-  localparam bit [`OPCODE_SIZE] OpcodeStore = 7'b01_000_11;
-  localparam bit [`OPCODE_SIZE] OpcodeBranch = 7'b11_000_11;
-  localparam bit [`OPCODE_SIZE] OpcodeJalr = 7'b11_001_11;
-  localparam bit [`OPCODE_SIZE] OpcodeMiscMem = 7'b00_011_11;
-  localparam bit [`OPCODE_SIZE] OpcodeJal = 7'b11_011_11;
+  // localparam bit [`OPCODE_SIZE] OpcodeLoad = 7'b00_000_11;
+  // localparam bit [`OPCODE_SIZE] OpcodeStore = 7'b01_000_11;
+  // localparam bit [`OPCODE_SIZE] OpcodeBranch = 7'b11_000_11;
+  // localparam bit [`OPCODE_SIZE] OpcodeJalr = 7'b11_001_11;
+  // localparam bit [`OPCODE_SIZE] OpcodeMiscMem = 7'b00_011_11;
+  // localparam bit [`OPCODE_SIZE] OpcodeJal = 7'b11_011_11;
 
-  localparam bit [`OPCODE_SIZE] OpcodeRegImm = 7'b00_100_11;
-  localparam bit [`OPCODE_SIZE] OpcodeRegReg = 7'b01_100_11;
-  localparam bit [`OPCODE_SIZE] OpcodeEnviron = 7'b11_100_11;
+  // localparam bit [`OPCODE_SIZE] OpcodeRegImm = 7'b00_100_11;
+  // localparam bit [`OPCODE_SIZE] OpcodeRegReg = 7'b01_100_11;
+  // localparam bit [`OPCODE_SIZE] OpcodeEnviron = 7'b11_100_11;
 
-  localparam bit [`OPCODE_SIZE] OpcodeAuipc = 7'b00_101_11;
-  localparam bit [`OPCODE_SIZE] OpcodeLui = 7'b01_101_11;
+  // localparam bit [`OPCODE_SIZE] OpcodeAuipc = 7'b00_101_11;
+  // localparam bit [`OPCODE_SIZE] OpcodeLui = 7'b01_101_11;
 
   // cycle counter, not really part of any stage but useful for orienting within GtkWave
   // do not rename this as the testbench uses this value
@@ -155,12 +274,12 @@ module DatapathPipelined (
   // program counter
   always_ff @(posedge clk) begin
     if (rst) begin
-      f_pc_current <= 32'd0;
+      f_pc_current   <= 32'd0;
       // NB: use CYCLE_NO_STALL since this is the value that will persist after the last reset cycle
       f_cycle_status <= CYCLE_NO_STALL;
     end else begin
       f_cycle_status <= CYCLE_NO_STALL;
-      f_pc_current <= f_pc_current + 4;
+      f_pc_current   <= f_pc_current + 4;
     end
   end
   // send PC to imem
@@ -185,18 +304,10 @@ module DatapathPipelined (
   stage_decode_t decode_state;
   always_ff @(posedge clk) begin
     if (rst) begin
-      decode_state <= '{
-        pc: 0,
-        insn: 0,
-        cycle_status: CYCLE_RESET
-      };
+      decode_state <= '{pc: 0, insn: 0, cycle_status: CYCLE_RESET};
     end else begin
       begin
-        decode_state <= '{
-          pc: f_pc_current,
-          insn: f_insn,
-          cycle_status: f_cycle_status
-        };
+        decode_state <= '{pc: f_pc_current, insn: f_insn, cycle_status: f_cycle_status};
       end
     end
   end
@@ -208,15 +319,391 @@ module DatapathPipelined (
       .disasm(d_disasm)
   );
 
+  // components of the instruction
+  wire [6:0] d_insn_funct7;
+  wire [2:0] d_insn_funct3;
+  wire [4:0] d_insn_rs1;
+  wire [4:0] d_insn_rs2;
+  wire [4:0] d_insn_rd;
+  wire [`OPCODE_SIZE] d_insn_opcode;
+
+  // split R-type instruction - see section 2.2 of RiscV spec
+  assign {d_insn_funct7, d_insn_rs2, d_insn_rs1, d_insn_funct3, d_insn_rd, d_insn_opcode} = decode_state.insn;
+
+  // setup for I, S, B & J type instructions
+  // I - short immediates and loads
+  wire [11:0] d_imm_i;
+  assign d_imm_i = decode_state.insn[31:20];
+  wire [ 4:0] d_imm_shamt = decode_state.insn[24:20];
+
+  // S - stores
+  wire [11:0] d_imm_s;
+  assign d_imm_s[11:5] = d_insn_funct7, d_imm_s[4:0] = d_insn_rd;
+
+  // B - conditionals
+  wire [12:0] d_imm_b;
+  assign {d_imm_b[12], d_imm_b[10:5]} = d_insn_funct7,
+      {d_imm_b[4:1], d_imm_b[11]} = d_insn_rd,
+      d_imm_b[0] = 1'b0;
+
+  // J - unconditional jumps
+  wire [20:0] d_imm_j;
+  assign {d_imm_j[20], d_imm_j[10:1], d_imm_j[11], d_imm_j[19:12], d_imm_j[0]} = {
+    decode_state.insn[31:12], 1'b0
+  };
+
+  // U - setup for U type instructions
+  wire [19:0] d_imm_u;
+  assign d_imm_u = decode_state.insn[31:12];
+
+  wire [`REG_SIZE] d_imm_i_sext = {{20{d_imm_i[11]}}, d_imm_i[11:0]};
+  wire [`REG_SIZE] d_imm_s_sext = {{20{d_imm_s[11]}}, d_imm_s[11:0]};
+  wire [`REG_SIZE] d_imm_b_sext = {{19{d_imm_b[12]}}, d_imm_b[12:0]};
+  wire [`REG_SIZE] d_imm_j_sext = {{11{d_imm_j[20]}}, d_imm_j[20:0]};
+
+  // opcodes - see section 19 of RiscV spec
+  localparam bit [`OPCODE_SIZE] OpLoad = 7'b00_000_11;
+  localparam bit [`OPCODE_SIZE] OpStore = 7'b01_000_11;
+  localparam bit [`OPCODE_SIZE] OpBranch = 7'b11_000_11;
+  localparam bit [`OPCODE_SIZE] OpJalr = 7'b11_001_11;
+  localparam bit [`OPCODE_SIZE] OpMiscMem = 7'b00_011_11;
+  localparam bit [`OPCODE_SIZE] OpJal = 7'b11_011_11;
+
+  localparam bit [`OPCODE_SIZE] OpRegImm = 7'b00_100_11;
+  localparam bit [`OPCODE_SIZE] OpRegReg = 7'b01_100_11;
+  localparam bit [`OPCODE_SIZE] OpEnviron = 7'b11_100_11;
+
+  localparam bit [`OPCODE_SIZE] OpAuipc = 7'b00_101_11;
+  localparam bit [`OPCODE_SIZE] OpLui = 7'b01_101_11;
+
+  wire d_insn_lui = d_insn_opcode == OpLui;
+  wire d_insn_auipc = d_insn_opcode == OpAuipc;
+  wire d_insn_jal = d_insn_opcode == OpJal;
+  wire d_insn_jalr = d_insn_opcode == OpJalr;
+
+  wire d_insn_beq = d_insn_opcode == OpBranch && decode_state.insn[14:12] == 3'b000;
+  wire d_insn_bne = d_insn_opcode == OpBranch && decode_state.insn[14:12] == 3'b001;
+  wire d_insn_blt = d_insn_opcode == OpBranch && decode_state.insn[14:12] == 3'b100;
+  wire d_insn_bge = d_insn_opcode == OpBranch && decode_state.insn[14:12] == 3'b101;
+  wire d_insn_bltu = d_insn_opcode == OpBranch && decode_state.insn[14:12] == 3'b110;
+  wire d_insn_bgeu = d_insn_opcode == OpBranch && decode_state.insn[14:12] == 3'b111;
+
+  wire d_insn_lb = d_insn_opcode == OpLoad && decode_state.insn[14:12] == 3'b000;
+  wire d_insn_lh = d_insn_opcode == OpLoad && decode_state.insn[14:12] == 3'b001;
+  wire d_insn_lw = d_insn_opcode == OpLoad && decode_state.insn[14:12] == 3'b010;
+  wire d_insn_lbu = d_insn_opcode == OpLoad && decode_state.insn[14:12] == 3'b100;
+  wire d_insn_lhu = d_insn_opcode == OpLoad && decode_state.insn[14:12] == 3'b101;
+
+  wire d_insn_sb = d_insn_opcode == OpStore && decode_state.insn[14:12] == 3'b000;
+  wire d_insn_sh = d_insn_opcode == OpStore && decode_state.insn[14:12] == 3'b001;
+  wire d_insn_sw = d_insn_opcode == OpStore && decode_state.insn[14:12] == 3'b010;
+
+  wire d_insn_addi = d_insn_opcode == OpRegImm && decode_state.insn[14:12] == 3'b000;
+  wire d_insn_slti = d_insn_opcode == OpRegImm && decode_state.insn[14:12] == 3'b010;
+  wire d_insn_sltiu = d_insn_opcode == OpRegImm && decode_state.insn[14:12] == 3'b011;
+  wire d_insn_xori = d_insn_opcode == OpRegImm && decode_state.insn[14:12] == 3'b100;
+  wire d_insn_ori = d_insn_opcode == OpRegImm && decode_state.insn[14:12] == 3'b110;
+  wire d_insn_andi = d_insn_opcode == OpRegImm && decode_state.insn[14:12] == 3'b111;
+
+  wire d_insn_slli = d_insn_opcode == OpRegImm && decode_state.insn[14:12] == 3'b001 && decode_state.insn[31:25] == 7'd0;
+  wire d_insn_srli = d_insn_opcode == OpRegImm && decode_state.insn[14:12] == 3'b101 && decode_state.insn[31:25] == 7'd0;
+  wire d_insn_srai = d_insn_opcode == OpRegImm && decode_state.insn[14:12] == 3'b101 && decode_state.insn[31:25] == 7'b0100000;
+
+  wire d_insn_add = d_insn_opcode == OpRegReg && decode_state.insn[14:12] == 3'b000 && decode_state.insn[31:25] == 7'd0;
+  wire d_insn_sub  = d_insn_opcode == OpRegReg && decode_state.insn[14:12] == 3'b000 && decode_state.insn[31:25] == 7'b0100000;
+  wire d_insn_sll = d_insn_opcode == OpRegReg && decode_state.insn[14:12] == 3'b001 && decode_state.insn[31:25] == 7'd0;
+  wire d_insn_slt = d_insn_opcode == OpRegReg && decode_state.insn[14:12] == 3'b010 && decode_state.insn[31:25] == 7'd0;
+  wire d_insn_sltu = d_insn_opcode == OpRegReg && decode_state.insn[14:12] == 3'b011 && decode_state.insn[31:25] == 7'd0;
+  wire d_insn_xor = d_insn_opcode == OpRegReg && decode_state.insn[14:12] == 3'b100 && decode_state.insn[31:25] == 7'd0;
+  wire d_insn_srl = d_insn_opcode == OpRegReg && decode_state.insn[14:12] == 3'b101 && decode_state.insn[31:25] == 7'd0;
+  wire d_insn_sra  = d_insn_opcode == OpRegReg && decode_state.insn[14:12] == 3'b101 && decode_state.insn[31:25] == 7'b0100000;
+  wire d_insn_or = d_insn_opcode == OpRegReg && decode_state.insn[14:12] == 3'b110 && decode_state.insn[31:25] == 7'd0;
+  wire d_insn_and = d_insn_opcode == OpRegReg && decode_state.insn[14:12] == 3'b111 && decode_state.insn[31:25] == 7'd0;
+
+  wire d_insn_mul    = d_insn_opcode == OpRegReg && decode_state.insn[31:25] == 7'd1 && decode_state.insn[14:12] == 3'b000;
+  wire d_insn_mulh   = d_insn_opcode == OpRegReg && decode_state.insn[31:25] == 7'd1 && decode_state.insn[14:12] == 3'b001;
+  wire d_insn_mulhsu = d_insn_opcode == OpRegReg && decode_state.insn[31:25] == 7'd1 && decode_state.insn[14:12] == 3'b010;
+  wire d_insn_mulhu  = d_insn_opcode == OpRegReg && decode_state.insn[31:25] == 7'd1 && decode_state.insn[14:12] == 3'b011;
+  wire d_insn_div    = d_insn_opcode == OpRegReg && decode_state.insn[31:25] == 7'd1 && decode_state.insn[14:12] == 3'b100;
+  wire d_insn_divu   = d_insn_opcode == OpRegReg && decode_state.insn[31:25] == 7'd1 && decode_state.insn[14:12] == 3'b101;
+  wire d_insn_rem    = d_insn_opcode == OpRegReg && decode_state.insn[31:25] == 7'd1 && decode_state.insn[14:12] == 3'b110;
+  wire d_insn_remu   = d_insn_opcode == OpRegReg && decode_state.insn[31:25] == 7'd1 && decode_state.insn[14:12] == 3'b111;
+
+  wire d_insn_ecall = d_insn_opcode == OpEnviron && decode_state.insn[31:7] == 25'd0;
+  wire d_insn_fence = d_insn_opcode == OpMiscMem;
+
+  /*****************/
+  /* EXECUTE STAGE */
+  /*****************/
+
+  stage_execute_t execute_state;
+  always_ff @(posedge clk) begin
+    if (rst) begin
+      execute_state <= '{
+          pc: 0,
+          insn: 0,
+          cycle_status: CYCLE_RESET,
+
+          rs1: 0,
+          rs2: 0,
+          rd: 0,
+
+          imm_u: 0,
+
+          insn_lui: 0,
+          insn_auipc: 0,
+          insn_jal: 0,
+          insn_jalr: 0,
+          insn_beq: 0,
+          insn_bne: 0,
+          insn_blt: 0,
+          insn_bge: 0,
+          insn_bltu: 0,
+          insn_bgeu: 0,
+          insn_lb: 0,
+          insn_lh: 0,
+          insn_lw: 0,
+          insn_lbu: 0,
+          insn_lhu: 0,
+          insn_sb: 0,
+          insn_sh: 0,
+          insn_sw: 0,
+          insn_addi: 0,
+          insn_slti: 0,
+          insn_sltiu: 0,
+          insn_xori: 0,
+          insn_ori: 0,
+          insn_andi: 0,
+          insn_slli: 0,
+          insn_srli: 0,
+          insn_srai: 0,
+          insn_add: 0,
+          insn_sub: 0,
+          insn_sll: 0,
+          insn_slt: 0,
+          insn_sltu: 0,
+          insn_xor: 0,
+          insn_srl: 0,
+          insn_sra: 0,
+          insn_or: 0,
+          insn_and: 0,
+          insn_mul: 0,
+          insn_mulh: 0,
+          insn_mulhsu: 0,
+          insn_mulhu: 0,
+          insn_div: 0,
+          insn_divu: 0,
+          insn_rem: 0,
+          insn_remu: 0,
+          insn_ecall: 0,
+          insn_fence: 0
+      };
+    end else begin
+      begin
+        execute_state <= '{
+            pc: decode_state.pc,
+            insn: decode_state.insn,
+            cycle_status: decode_state.cycle_status,
+
+            rs1: d_insn_rs1,
+            rs2: d_insn_rs2,
+            rd: d_insn_rd,
+
+            imm_u: d_imm_u,
+
+            insn_lui: d_insn_lui,
+            insn_auipc: d_insn_auipc,
+            insn_jal: d_insn_jal,
+            insn_jalr: d_insn_jalr,
+            insn_beq: d_insn_beq,
+            insn_bne: d_insn_bne,
+            insn_blt: d_insn_blt,
+            insn_bge: d_insn_bge,
+            insn_bltu: d_insn_bltu,
+            insn_bgeu: d_insn_bgeu,
+            insn_lb: d_insn_lb,
+            insn_lh: d_insn_lh,
+            insn_lw: d_insn_lw,
+            insn_lbu: d_insn_lbu,
+            insn_lhu: d_insn_lhu,
+            insn_sb: d_insn_sb,
+            insn_sh: d_insn_sh,
+            insn_sw: d_insn_sw,
+            insn_addi: d_insn_addi,
+            insn_slti: d_insn_slti,
+            insn_sltiu: d_insn_sltiu,
+            insn_xori: d_insn_xori,
+            insn_ori: d_insn_ori,
+            insn_andi: d_insn_andi,
+            insn_slli: d_insn_slli,
+            insn_srli: d_insn_srli,
+            insn_srai: d_insn_srai,
+            insn_add: d_insn_add,
+            insn_sub: d_insn_sub,
+            insn_sll: d_insn_sll,
+            insn_slt: d_insn_slt,
+            insn_sltu: d_insn_sltu,
+            insn_xor: d_insn_xor,
+            insn_srl: d_insn_srl,
+            insn_sra: d_insn_sra,
+            insn_or: d_insn_or,
+            insn_and: d_insn_and,
+            insn_mul: d_insn_mul,
+            insn_mulh: d_insn_mulh,
+            insn_mulhsu: d_insn_mulhsu,
+            insn_mulhu: d_insn_mulhu,
+            insn_div: d_insn_div,
+            insn_divu: d_insn_divu,
+            insn_rem: d_insn_rem,
+            insn_remu: d_insn_remu,
+            insn_ecall: d_insn_ecall,
+            insn_fence: d_insn_fence
+        };
+      end
+    end
+  end
+  wire [255:0] x_disasm;
+  Disasm #(
+      .PREFIX("X")
+  ) disasm_2execute (
+      .insn  (execute_state.insn),
+      .disasm(x_disasm)
+  );
+
   // TODO: your code here, though you will also need to modify some of the code above
   // TODO: the testbench requires that your register file instance is named `rf`
 
-  // James: so we will need to implement
-  // Execute: ALU, branch, jump, load, store, fence.i
-  // Memory: load, store
-  // Writeback: write to register file
-  // not sure what changes we will need to make to RegFile if any
+  // // //
+  // EXECUTE: Modules Used
+  // // //
 
+  logic [4:0] x_rd;
+  logic [`REG_SIZE] x_rd_data_inter;
+  logic [`REG_SIZE] x_rd_data, x_rs1_data, x_rs2_data;
+
+  logic [`REG_SIZE] x_cla_a, x_cla_b;
+
+  cla m_cla (
+      .a  (x_cla_a),
+      .b  (x_cla_b),
+      .cin(1'b0),
+      .sum(x_rd_data_inter)
+  );
+
+  // // //
+  // EXECUTE: Logic
+  // // //
+
+  always_comb begin
+
+    if (execute_state.insn_lui == 1) begin
+      x_rd = execute_state.rd;
+      x_rd_data = {execute_state.imm_u, 12'b0};
+    end else begin
+      x_rd = 0;
+      x_rd_data = 0;
+    end
+
+    // More instructions here...
+
+  end
+
+  /****************/
+  /* MEMORY STAGE */
+  /****************/
+
+  stage_memory_t memory_state;
+  always_ff @(posedge clk) begin
+    if (rst) begin
+      memory_state <= '{
+          pc: 0,
+          insn: 0,
+          cycle_status: CYCLE_RESET,
+
+          rd: 0,
+          rd_data: 0,
+
+          insn_lui: execute_state.insn_lui
+      };
+    end else begin
+      begin
+        memory_state <= '{
+            pc: execute_state.pc,
+            insn: execute_state.insn,
+            cycle_status: execute_state.cycle_status,
+
+            rd: x_rd,
+            rd_data: x_rd_data,
+
+            insn_lui: execute_state.insn_lui
+        };
+      end
+    end
+  end
+  wire [255:0] m_disasm;
+  Disasm #(
+      .PREFIX("M")
+  ) disasm_3memory (
+      .insn  (execute_state.insn),
+      .disasm(m_disasm)
+  );
+
+  /*******************/
+  /* WRITEBACK STAGE */
+  /*******************/
+
+  stage_writeback_t writeback_state;
+  always_ff @(posedge clk) begin
+    if (rst) begin
+      writeback_state <= '{
+          pc: 0,
+          insn: 0,
+          cycle_status: CYCLE_RESET,
+
+          rd: 0,
+          rd_data: 0,
+
+          insn_lui: 0
+      };
+    end else begin
+      begin
+        writeback_state <= '{
+            pc: memory_state.pc,
+            insn: memory_state.insn,
+            cycle_status: memory_state.cycle_status,
+
+            rd: memory_state.rd,
+            rd_data: memory_state.rd_data,
+
+            insn_lui: memory_state.insn_lui
+        };
+      end
+    end
+  end
+  wire [255:0] w_disasm;
+  Disasm #(
+      .PREFIX("W")
+  ) disasm_4writeback (
+      .insn  (memory_state.insn),
+      .disasm(w_disasm)
+  );
+
+  logic w_we;
+  logic [`REG_SIZE] w_rd_data;
+
+  always_comb begin
+
+    if (writeback_state.insn_lui == 1) begin
+      w_rd_data = writeback_state.rd_data;
+      w_we = 1;
+    end else begin
+      w_rd_data = 0;
+      w_we = 0;
+    end
+
+    // More instructions here...
+
+  end
 endmodule
 
 module MemorySingleCycle #(
@@ -294,8 +781,8 @@ endmodule
 
 /* This design has just one clock for both processor and memory. */
 module RiscvProcessor (
-    input  wire  clk,
-    input  wire  rst,
+    input wire clk,
+    input wire rst,
     output logic halt,
     output wire [`REG_SIZE] trace_writeback_pc,
     output wire [`INSN_SIZE] trace_writeback_insn,
