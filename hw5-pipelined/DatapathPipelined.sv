@@ -211,6 +211,12 @@ module DatapathPipelined (
   // TODO: your code here, though you will also need to modify some of the code above
   // TODO: the testbench requires that your register file instance is named `rf`
 
+  // James: so we will need to implement
+  // Execute: ALU, branch, jump, load, store, fence.i
+  // Memory: load, store
+  // Writeback: write to register file
+  // not sure what changes we will need to make to RegFile if any
+
 endmodule
 
 module MemorySingleCycle #(
