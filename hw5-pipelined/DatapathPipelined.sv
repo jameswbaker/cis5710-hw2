@@ -121,6 +121,7 @@ typedef struct packed {
   logic [4:0] rd;
 
   logic [19:0] imm_u;
+  logic [4:0] imm_i_4_0;
   logic [`REG_SIZE] imm_i_sext;
 
   logic insn_lui;
@@ -335,7 +336,8 @@ module DatapathPipelined (
   // I - short immediates and loads
   wire [11:0] d_imm_i;
   assign d_imm_i = decode_state.insn[31:20];
-  wire [ 4:0] d_imm_shamt = decode_state.insn[24:20];
+  wire [4:0] d_imm_shamt = decode_state.insn[24:20];
+  wire [4:0] d_imm_i_4_0 = d_imm_i[4:0];
 
   // S - stores
   wire [11:0] d_imm_s;
@@ -450,6 +452,7 @@ module DatapathPipelined (
           rd: 0,
 
           imm_u: 0,
+          imm_i_4_0: 0,
           imm_i_sext: 0,
 
           insn_lui: 0,
@@ -512,6 +515,7 @@ module DatapathPipelined (
             rd: d_insn_rd,
 
             imm_u: d_imm_u,
+            imm_i_4_0: d_imm_i_4_0,
             imm_i_sext: d_imm_i_sext,
 
             insn_lui: d_insn_lui,
@@ -588,11 +592,21 @@ module DatapathPipelined (
   logic [`REG_SIZE] x_cla_a, x_cla_b;
 
   cla x_cla (
-      .a  (x_cla_a),
-      .b  (x_cla_b),
-      .cin(1'b0),
-      .sum(x_rd_data_inter)
+    .a  (x_cla_a),
+    .b  (x_cla_b),
+    .cin(1'b0),
+    .sum(x_rd_data_inter)
   );
+
+  logic [`REG_SIZE] x_cla_inc_in, x_cla_inc_out;
+  wire [31:0] cla_one = 32'b1;
+
+  cla x_cla_incr (
+    .a  (x_cla_inc_in),
+    .b  (x_cla_single),
+    .cin(1'b0),
+    .sum(x_cla_inc_out)
+  )
 
   // // //
   // EXECUTE: Logic
@@ -617,7 +631,78 @@ module DatapathPipelined (
       x_rd = execute_state.rd;
       x_rd_data = x_rd_data_inter;
       x_we = 1;
-    end else begin
+    end 
+    else if (execute_state.insn_slti == 1) begin
+      x_cla_a = 0;
+      x_cla_b = 0;
+
+      x_rd = execute_state.rd;
+      x_rd_data = $signed(x_rs1_data) < $signed(execute_state.imm_i_sext) ? 1 : 0; 
+      x_we = 1;
+    end
+    else if (execute_state.insn_sltiu == 1) begin
+      x_cla_a = 0;
+      x_cla_b = 0;
+
+      x_rd = execute_state.rd;
+      x_rd_data = $unsigned(x_rs1_data) < $unsigned(execute_state.imm_i_sext) ? 1 : 0; 
+      x_we = 1;
+    end
+    else if (execute_state.insn_xori == 1) begin
+      x_cla_a = 0;
+      x_cla_b = 0;
+
+      x_rd = execute_state.rd;
+      x_rd_data = x_rs1_data ^ execute_state.imm_i_sext; 
+      x_we = 1;
+    end
+    else if (execute_state.insn_ori == 1) begin
+      x_cla_a = 0;
+      x_cla_b = 0;
+
+      x_rd = execute_state.rd;
+      x_rd_data = x_rs1_data | execute_state.imm_i_sext;
+      x_we = 1;
+    end
+    else if (execute_state.insn_andi == 1) begin
+      x_cla_a = 0;
+      x_cla_b = 0;
+
+      x_rd = execute_state.rd;
+      x_rd_data = x_rs1_data & execute_state.imm_i_sext; 
+      x_we = 1;
+    end
+    else if (execute_state.insn_slli == 1) begin
+      // rd_data = rs1_data << imm_i[4:0];
+      x_cla_a = 0;
+      x_cla_b = 0;
+
+      /* TODO: how to take rs1_data << imm_i[4:0] */
+      // Note: To fix this I implemented a new thing in decode/execute stage: d_imm_i_4_0. in decode stage it takes [4:0] from d_imm_i
+
+      x_rd = execute_state.rd;
+      x_rd_data = x_rs1_data << execute_state.imm_i_4_0; 
+      x_we = 1;
+    end
+    else if (execute_state.insn_srli == 1) begin
+      // rd_data = rs1_data >> imm_i[4:0];
+      x_cla_a = 0;
+      x_cla_b = 0;
+
+      x_rd = execute_state.rd;
+      x_rd_data = x_rs1_data >> execute_state.imm_i_4_0; 
+      x_we = 1;
+    end
+    else if (execute_state.insn_srai == 1) begin
+      // rd_data = $signed(rs1_data) >>> imm_i[4:0];
+      x_cla_a = 0;
+      x_cla_b = 0;
+
+      x_rd = execute_state.rd;
+      x_rd_data = $signed(x_rs1_data) >>> execute_state.imm_i_4_0;
+      x_we = 1;
+    end
+    else begin
       x_cla_a = 0;
       x_cla_b = 0;
 
@@ -625,6 +710,105 @@ module DatapathPipelined (
       x_rd_data = 0;
       x_we = 0;
     end
+
+
+    if (execute_state.insn_add == 1) begin
+      x_cla_a = x_rs1_data;
+      x_cla_b = x_rs2_data;
+
+      x_rd = execute_state.rd;
+      x_rd_data = x_rd_data_inter;
+      x_we = 1;
+    end
+    else if (execute_state.insn_sub == 1) begin
+      /*
+      cla_inc_in = ~rs2_data;  // invert all the bits
+      cla_b = cla_inc_out;  // add 1
+      */
+      x_cla_a = x_rs1_data
+      
+      x_cla_inc_in = ~x_rs2_data;
+      x_cla_b = cla_inc_out;
+
+      x_rd = execute_state.rd;
+      x_rd_data = x_rd_data_inter;
+      x_we = 1;
+    end
+    else if (execute_state.insn_slt == 1) begin
+      // $signed(rs1_data) < $signed(rs2_data) ? 1 : 0;
+
+      x_rd = execute_state.rd;
+      x_rd_data = $signed(x_rs1_data) < $signed(x_rs2_data) ? 1 : 0;
+      x_we = 1;
+    end
+    else if (execute_state.insn_sll == 1) begin
+      // TODO: rs1_data << rs2_data[4:0]
+
+
+    end
+    else if (execute_state.insn_sltu == 1) begin
+    
+      x_rd = execute_state.rd;
+      x_rd_data = $unsigned(x_rs1_data) < $unsigned(x_rs2_data) ? 1 : 0;
+      x_we = 1;
+    end
+    else if (execute_state.insn_xor == 1) begin
+      x_rd = execute_state.rd;
+      x_rd_data = x_rs1_data ^ x_rs2_data;
+      x_we = 1;
+    end
+    else if (execute_state.insn_srl == 1) begin
+      // TODO: rs1_data >> rs2_data[4:0]
+
+    end
+    else if (execute_state.insn_sra == 1) begin
+      // TODO: $signed(rs1_data) >>> rs2_data[4:0]
+
+    end
+    else if (execute_state.insn_or == 1) begin
+      x_rd = execute_state.rd;
+      x_rd_data = x_rs1_data | x_rs2_data;
+      x_we = 1;
+    end
+    else if (execute_state.insn_and == 1) begin
+      x_rd = execute_state.rd;
+      x_rd_data = x_rs1_data & x_rs2_data;
+      x_we = 1;
+    end
+    // TODO: Multiplication and Division
+    else if (execute_state.insn_mul == 1) begin
+    
+    end
+    else if (execute_state.insn_mulh == 1) begin
+    
+    end
+    else if (execute_state.insn_mulhsu == 1) begin
+    
+    end
+    else if (execute_state.insn_mulhu == 1) begin
+
+    end
+    else if (execute_state.insn_div == 1) begin
+    
+    end
+    else if (execute_state.insn_divu == 1) begin
+    
+    end
+    else if (execute_state.insn_rem == 1) begin
+    
+    end
+    else if (execute_state.insn_remu == 1) begin
+    
+    end
+    else begin
+      x_cla_a = 0;
+      x_cla_b = 0;
+
+      x_rd = 0;
+      x_rd_data = 0;
+      x_we = 0;
+    end
+    
 
     // More instructions here...
 
