@@ -9,6 +9,9 @@
 // RV opcodes are 7 bits
 `define OPCODE_SIZE 6:0
 
+// size of the wire to track insn name (6 bits)
+`define INSN_NAME_SIZE 5:0
+
 `ifndef RISCV_FORMAL
 `include "../hw2b/cla.sv"
 `include "../hw3-singlecycle/RvDisassembler.sv"
@@ -124,53 +127,7 @@ typedef struct packed {
   logic [4:0] imm_i_4_0;
   logic [`REG_SIZE] imm_i_sext;
 
-  logic insn_lui;
-  logic insn_auipc;
-  logic insn_jal;
-  logic insn_jalr;
-  logic insn_beq;
-  logic insn_bne;
-  logic insn_blt;
-  logic insn_bge;
-  logic insn_bltu;
-  logic insn_bgeu;
-  logic insn_lb;
-  logic insn_lh;
-  logic insn_lw;
-  logic insn_lbu;
-  logic insn_lhu;
-  logic insn_sb;
-  logic insn_sh;
-  logic insn_sw;
-  logic insn_addi;
-  logic insn_slti;
-  logic insn_sltiu;
-  logic insn_xori;
-  logic insn_ori;
-  logic insn_andi;
-  logic insn_slli;
-  logic insn_srli;
-  logic insn_srai;
-  logic insn_add;
-  logic insn_sub;
-  logic insn_sll;
-  logic insn_slt;
-  logic insn_sltu;
-  logic insn_xor;
-  logic insn_srl;
-  logic insn_sra;
-  logic insn_or;
-  logic insn_and;
-  logic insn_mul;
-  logic insn_mulh;
-  logic insn_mulhsu;
-  logic insn_mulhu;
-  logic insn_div;
-  logic insn_divu;
-  logic insn_rem;
-  logic insn_remu;
-  logic insn_ecall;
-  logic insn_fence;
+  logic [`INSN_NAME_SIZE] insn_name;
 } stage_execute_t;
 
 /** memory state **/
@@ -336,8 +293,8 @@ module DatapathPipelined (
   // I - short immediates and loads
   wire [11:0] d_imm_i;
   assign d_imm_i = decode_state.insn[31:20];
-  wire [4:0] d_imm_shamt = decode_state.insn[24:20];
-  wire [4:0] d_imm_i_4_0 = d_imm_i[4:0];
+  wire [ 4:0] d_imm_shamt = decode_state.insn[24:20];
+  wire [ 4:0] d_imm_i_4_0 = d_imm_i[4:0];
 
   // S - stores
   wire [11:0] d_imm_s;
@@ -435,6 +392,104 @@ module DatapathPipelined (
   wire d_insn_ecall = d_insn_opcode == OpEnviron && decode_state.insn[31:7] == 25'd0;
   wire d_insn_fence = d_insn_opcode == OpMiscMem;
 
+  logic [5:0] d_insn_name;
+  localparam bit [5:0] InsnLui = 6'd1;
+  localparam bit [5:0] InsnAuipc = 6'd2;
+  localparam bit [5:0] InsnJal = 6'd3;
+  localparam bit [5:0] InsnJalr = 6'd4;
+  localparam bit [5:0] InsnBeq = 6'd5;
+  localparam bit [5:0] InsnBne = 6'd6;
+  localparam bit [5:0] InsnBlt = 6'd7;
+  localparam bit [5:0] InsnBge = 6'd8;
+  localparam bit [5:0] InsnBltu = 6'd9;
+  localparam bit [5:0] InsnBgeu = 6'd10;
+  localparam bit [5:0] InsnLb = 6'd11;
+  localparam bit [5:0] InsnLh = 6'd12;
+  localparam bit [5:0] InsnLw = 6'd13;
+  localparam bit [5:0] InsnLbu = 6'd14;
+  localparam bit [5:0] InsnLhu = 6'd15;
+  localparam bit [5:0] InsnSb = 6'd16;
+  localparam bit [5:0] InsnSh = 6'd17;
+  localparam bit [5:0] InsnSw = 6'd18;
+  localparam bit [5:0] InsnAddi = 6'd19;
+  localparam bit [5:0] InsnSlti = 6'd20;
+  localparam bit [5:0] InsnSltiu = 6'd21;
+  localparam bit [5:0] InsnXori = 6'd22;
+  localparam bit [5:0] InsnOri = 6'd23;
+  localparam bit [5:0] InsnAndi = 6'd24;
+  localparam bit [5:0] InsnSlli = 6'd25;
+  localparam bit [5:0] InsnSrli = 6'd26;
+  localparam bit [5:0] InsnSrai = 6'd27;
+  localparam bit [5:0] InsnAdd = 6'd28;
+  localparam bit [5:0] InsnSub = 6'd29;
+  localparam bit [5:0] InsnSll = 6'd30;
+  localparam bit [5:0] InsnSlt = 6'd31;
+  localparam bit [5:0] InsnSltu = 6'd32;
+  localparam bit [5:0] InsnXor = 6'd33;
+  localparam bit [5:0] InsnSrl = 6'd34;
+  localparam bit [5:0] InsnSra = 6'd35;
+  localparam bit [5:0] InsnOr = 6'd36;
+  localparam bit [5:0] InsnAnd = 6'd37;
+  localparam bit [5:0] InsnMul = 6'd38;
+  localparam bit [5:0] InsnMulh = 6'd39;
+  localparam bit [5:0] InsnMulhsu = 6'd40;
+  localparam bit [5:0] InsnMulhu = 6'd41;
+  localparam bit [5:0] InsnDiv = 6'd42;
+  localparam bit [5:0] InsnDivu = 6'd43;
+  localparam bit [5:0] InsnRem = 6'd44;
+  localparam bit [5:0] InsnRemu = 6'd45;
+  localparam bit [5:0] InsnEcall = 6'd46;
+  localparam bit [5:0] InsnFence = 6'd47;
+
+  assign d_insn_name = d_insn_lui ? InsnLui : 
+    (d_insn_auipc ? InsnAuipc : 
+    (d_insn_jal ? InsnJal : 
+    (d_insn_jalr ? InsnJalr :
+    (d_insn_beq ? InsnBeq :
+    (d_insn_bne ? InsnBne :
+    (d_insn_blt ? InsnBlt :
+    (d_insn_bge ? InsnBge :
+    (d_insn_bltu ? InsnBltu :
+    (d_insn_bgeu ? InsnBgeu :
+    (d_insn_lb ? InsnLb :
+    (d_insn_lh ? InsnLh :
+    (d_insn_lw ? InsnLw :
+    (d_insn_lbu ? InsnLbu :
+    (d_insn_lhu ? InsnLhu :
+    (d_insn_sb ? InsnSb :
+    (d_insn_sh ? InsnSh :
+    (d_insn_sw ? InsnSw :
+    (d_insn_addi ? InsnAddi :
+    (d_insn_slti ? InsnSlti :
+    (d_insn_sltiu ? InsnSltiu :
+    (d_insn_xori ? InsnXori :
+    (d_insn_ori ? InsnOri :
+    (d_insn_andi ? InsnAndi :
+    (d_insn_slli ? InsnSlli :
+    (d_insn_srli ? InsnSrli :
+    (d_insn_srai ? InsnSrai :
+    (d_insn_add ? InsnAdd :
+    (d_insn_sub ? InsnSub :
+    (d_insn_sll ? InsnSll :
+    (d_insn_slt ? InsnSlt :
+    (d_insn_sltu ? InsnSltu :
+    (d_insn_xor ? InsnXor :
+    (d_insn_srl ? InsnSrl :
+    (d_insn_sra ? InsnSra :
+    (d_insn_or ? InsnOr :
+    (d_insn_and ? InsnAnd :
+    (d_insn_mul ? InsnMul :
+    (d_insn_mulh ? InsnMulh :
+    (d_insn_mulhsu ? InsnMulhsu :
+    (d_insn_mulhu ? InsnMulhu :
+    (d_insn_div ? InsnDiv :
+    (d_insn_divu ? InsnDivu :
+    (d_insn_rem ? InsnRem :
+    (d_insn_remu ? InsnRemu :
+    (d_insn_ecall ? InsnEcall :
+    (d_insn_fence ? InsnFence : 6'd0
+    ))))))))))))))))))))))))))))))))))))))))))))));
+
   /*****************/
   /* EXECUTE STAGE */
   /*****************/
@@ -455,53 +510,7 @@ module DatapathPipelined (
           imm_i_4_0: 0,
           imm_i_sext: 0,
 
-          insn_lui: 0,
-          insn_auipc: 0,
-          insn_jal: 0,
-          insn_jalr: 0,
-          insn_beq: 0,
-          insn_bne: 0,
-          insn_blt: 0,
-          insn_bge: 0,
-          insn_bltu: 0,
-          insn_bgeu: 0,
-          insn_lb: 0,
-          insn_lh: 0,
-          insn_lw: 0,
-          insn_lbu: 0,
-          insn_lhu: 0,
-          insn_sb: 0,
-          insn_sh: 0,
-          insn_sw: 0,
-          insn_addi: 0,
-          insn_slti: 0,
-          insn_sltiu: 0,
-          insn_xori: 0,
-          insn_ori: 0,
-          insn_andi: 0,
-          insn_slli: 0,
-          insn_srli: 0,
-          insn_srai: 0,
-          insn_add: 0,
-          insn_sub: 0,
-          insn_sll: 0,
-          insn_slt: 0,
-          insn_sltu: 0,
-          insn_xor: 0,
-          insn_srl: 0,
-          insn_sra: 0,
-          insn_or: 0,
-          insn_and: 0,
-          insn_mul: 0,
-          insn_mulh: 0,
-          insn_mulhsu: 0,
-          insn_mulhu: 0,
-          insn_div: 0,
-          insn_divu: 0,
-          insn_rem: 0,
-          insn_remu: 0,
-          insn_ecall: 0,
-          insn_fence: 0
+          insn_name: 0
       };
     end else begin
       begin
@@ -518,53 +527,7 @@ module DatapathPipelined (
             imm_i_4_0: d_imm_i_4_0,
             imm_i_sext: d_imm_i_sext,
 
-            insn_lui: d_insn_lui,
-            insn_auipc: d_insn_auipc,
-            insn_jal: d_insn_jal,
-            insn_jalr: d_insn_jalr,
-            insn_beq: d_insn_beq,
-            insn_bne: d_insn_bne,
-            insn_blt: d_insn_blt,
-            insn_bge: d_insn_bge,
-            insn_bltu: d_insn_bltu,
-            insn_bgeu: d_insn_bgeu,
-            insn_lb: d_insn_lb,
-            insn_lh: d_insn_lh,
-            insn_lw: d_insn_lw,
-            insn_lbu: d_insn_lbu,
-            insn_lhu: d_insn_lhu,
-            insn_sb: d_insn_sb,
-            insn_sh: d_insn_sh,
-            insn_sw: d_insn_sw,
-            insn_addi: d_insn_addi,
-            insn_slti: d_insn_slti,
-            insn_sltiu: d_insn_sltiu,
-            insn_xori: d_insn_xori,
-            insn_ori: d_insn_ori,
-            insn_andi: d_insn_andi,
-            insn_slli: d_insn_slli,
-            insn_srli: d_insn_srli,
-            insn_srai: d_insn_srai,
-            insn_add: d_insn_add,
-            insn_sub: d_insn_sub,
-            insn_sll: d_insn_sll,
-            insn_slt: d_insn_slt,
-            insn_sltu: d_insn_sltu,
-            insn_xor: d_insn_xor,
-            insn_srl: d_insn_srl,
-            insn_sra: d_insn_sra,
-            insn_or: d_insn_or,
-            insn_and: d_insn_and,
-            insn_mul: d_insn_mul,
-            insn_mulh: d_insn_mulh,
-            insn_mulhsu: d_insn_mulhsu,
-            insn_mulhu: d_insn_mulhu,
-            insn_div: d_insn_div,
-            insn_divu: d_insn_divu,
-            insn_rem: d_insn_rem,
-            insn_remu: d_insn_remu,
-            insn_ecall: d_insn_ecall,
-            insn_fence: d_insn_fence
+            insn_name: d_insn_name
         };
       end
     end
@@ -592,226 +555,166 @@ module DatapathPipelined (
   logic [`REG_SIZE] x_cla_a, x_cla_b;
 
   cla x_cla (
-    .a  (x_cla_a),
-    .b  (x_cla_b),
-    .cin(1'b0),
-    .sum(x_rd_data_inter)
+      .a  (x_cla_a),
+      .b  (x_cla_b),
+      .cin(1'b0),
+      .sum(x_rd_data_inter)
   );
 
   logic [`REG_SIZE] x_cla_inc_in, x_cla_inc_out;
-  wire [31:0] cla_one = 32'b1;
+  logic [`REG_SIZE] x_cla_one = 32'b1;
 
   cla x_cla_incr (
-    .a  (x_cla_inc_in),
-    .b  (x_cla_single),
-    .cin(1'b0),
-    .sum(x_cla_inc_out)
-  )
+      .a  (x_cla_inc_in),
+      .b  (x_cla_one),
+      .cin(1'b0),
+      .sum(x_cla_inc_out)
+  );
 
   // // //
   // EXECUTE: Logic
   // // //
 
   always_comb begin
+    x_rd = 0;
+    x_rd_data = 0;
+    x_we = 0;
+    x_cla_inc_in = 0;
+    x_cla_a = 0;
+    x_cla_b = 0;
 
-    if (execute_state.insn_lui == 1) begin
-      x_rd = execute_state.rd;
-      x_rd_data = {execute_state.imm_u, 12'b0};
-      x_we = 1;
-    end else begin
-      x_rd = 0;
-      x_rd_data = 0;
-      x_we = 1;
-    end
+    case (execute_state.insn_name)
+      InsnLui: begin
+        x_rd = execute_state.rd;
+        x_rd_data = {execute_state.imm_u, 12'b0};
+        x_we = 1;
+      end
 
-    if (execute_state.insn_addi == 1) begin
-      x_cla_a = x_rs1_data;
-      x_cla_b = execute_state.imm_i_sext;
+      InsnAddi: begin
+        x_cla_a = x_rs1_data;
+        x_cla_b = execute_state.imm_i_sext;
 
-      x_rd = execute_state.rd;
-      x_rd_data = x_rd_data_inter;
-      x_we = 1;
-    end 
-    else if (execute_state.insn_slti == 1) begin
-      x_cla_a = 0;
-      x_cla_b = 0;
+        x_rd = execute_state.rd;
+        x_rd_data = x_rd_data_inter;
+        x_we = 1;
+      end
 
-      x_rd = execute_state.rd;
-      x_rd_data = $signed(x_rs1_data) < $signed(execute_state.imm_i_sext) ? 1 : 0; 
-      x_we = 1;
-    end
-    else if (execute_state.insn_sltiu == 1) begin
-      x_cla_a = 0;
-      x_cla_b = 0;
+      InsnSlti: begin
+        x_rd = execute_state.rd;
+        x_rd_data = $signed(x_rs1_data) < $signed(execute_state.imm_i_sext) ? 1 : 0;
+        x_we = 1;
+      end
 
-      x_rd = execute_state.rd;
-      x_rd_data = $unsigned(x_rs1_data) < $unsigned(execute_state.imm_i_sext) ? 1 : 0; 
-      x_we = 1;
-    end
-    else if (execute_state.insn_xori == 1) begin
-      x_cla_a = 0;
-      x_cla_b = 0;
+      InsnSltiu: begin
+        x_rd = execute_state.rd;
+        x_rd_data = $unsigned(x_rs1_data) < $unsigned(execute_state.imm_i_sext) ? 1 : 0;
+        x_we = 1;
+      end
 
-      x_rd = execute_state.rd;
-      x_rd_data = x_rs1_data ^ execute_state.imm_i_sext; 
-      x_we = 1;
-    end
-    else if (execute_state.insn_ori == 1) begin
-      x_cla_a = 0;
-      x_cla_b = 0;
+      InsnXori: begin
+        x_rd = execute_state.rd;
+        x_rd_data = x_rs1_data ^ execute_state.imm_i_sext;
+        x_we = 1;
+      end
 
-      x_rd = execute_state.rd;
-      x_rd_data = x_rs1_data | execute_state.imm_i_sext;
-      x_we = 1;
-    end
-    else if (execute_state.insn_andi == 1) begin
-      x_cla_a = 0;
-      x_cla_b = 0;
+      InsnOri: begin
+        x_rd = execute_state.rd;
+        x_rd_data = x_rs1_data | execute_state.imm_i_sext;
+        x_we = 1;
+      end
 
-      x_rd = execute_state.rd;
-      x_rd_data = x_rs1_data & execute_state.imm_i_sext; 
-      x_we = 1;
-    end
-    else if (execute_state.insn_slli == 1) begin
-      // rd_data = rs1_data << imm_i[4:0];
-      x_cla_a = 0;
-      x_cla_b = 0;
+      InsnAndi: begin
+        x_rd = execute_state.rd;
+        x_rd_data = x_rs1_data & execute_state.imm_i_sext;
+        x_we = 1;
+      end
 
-      /* TODO: how to take rs1_data << imm_i[4:0] */
-      // Note: To fix this I implemented a new thing in decode/execute stage: d_imm_i_4_0. in decode stage it takes [4:0] from d_imm_i
+      InsnSlli: begin
+        // Note: To fix this I implemented a new thing in decode/execute stage: d_imm_i_4_0. in decode stage it takes [4:0] from d_imm_i
 
-      x_rd = execute_state.rd;
-      x_rd_data = x_rs1_data << execute_state.imm_i_4_0; 
-      x_we = 1;
-    end
-    else if (execute_state.insn_srli == 1) begin
-      // rd_data = rs1_data >> imm_i[4:0];
-      x_cla_a = 0;
-      x_cla_b = 0;
+        x_rd = execute_state.rd;
+        x_rd_data = x_rs1_data << execute_state.imm_i_4_0;
+        x_we = 1;
+      end
 
-      x_rd = execute_state.rd;
-      x_rd_data = x_rs1_data >> execute_state.imm_i_4_0; 
-      x_we = 1;
-    end
-    else if (execute_state.insn_srai == 1) begin
-      // rd_data = $signed(rs1_data) >>> imm_i[4:0];
-      x_cla_a = 0;
-      x_cla_b = 0;
+      InsnSrli: begin
+        x_rd = execute_state.rd;
+        x_rd_data = x_rs1_data >> execute_state.imm_i_4_0;
+        x_we = 1;
+      end
 
-      x_rd = execute_state.rd;
-      x_rd_data = $signed(x_rs1_data) >>> execute_state.imm_i_4_0;
-      x_we = 1;
-    end
-    else begin
-      x_cla_a = 0;
-      x_cla_b = 0;
+      InsnSrai: begin
+        x_rd = execute_state.rd;
+        x_rd_data = $signed(x_rs1_data) >>> execute_state.imm_i_4_0;
+        x_we = 1;
+      end
 
-      x_rd = 0;
-      x_rd_data = 0;
-      x_we = 0;
-    end
+      InsnSltu: begin
+        x_rd = execute_state.rd;
+        x_rd_data = $unsigned(x_rs1_data) < $unsigned(x_rs2_data) ? 1 : 0;
+        x_we = 1;
+      end
 
+      InsnAdd: begin
+        x_cla_a = x_rs1_data;
+        x_cla_b = x_rs2_data;
+        x_cla_inc_in = 0;
 
-    if (execute_state.insn_add == 1) begin
-      x_cla_a = x_rs1_data;
-      x_cla_b = x_rs2_data;
+        x_rd = execute_state.rd;
+        x_rd_data = x_rd_data_inter;
+        x_we = 1;
+      end
 
-      x_rd = execute_state.rd;
-      x_rd_data = x_rd_data_inter;
-      x_we = 1;
-    end
-    else if (execute_state.insn_sub == 1) begin
-      /*
-      cla_inc_in = ~rs2_data;  // invert all the bits
-      cla_b = cla_inc_out;  // add 1
-      */
-      x_cla_a = x_rs1_data
-      
-      x_cla_inc_in = ~x_rs2_data;
-      x_cla_b = cla_inc_out;
+      InsnSub: begin
+        x_cla_inc_in = ~x_rs2_data;  // invert all the bits
+        x_cla_b = x_cla_inc_out;  // add 1
 
-      x_rd = execute_state.rd;
-      x_rd_data = x_rd_data_inter;
-      x_we = 1;
-    end
-    else if (execute_state.insn_slt == 1) begin
-      // $signed(rs1_data) < $signed(rs2_data) ? 1 : 0;
+        x_cla_a = x_rs1_data;
+        x_cla_b = x_cla_inc_out;
+        x_cla_inc_in = ~x_rs2_data;
 
-      x_rd = execute_state.rd;
-      x_rd_data = $signed(x_rs1_data) < $signed(x_rs2_data) ? 1 : 0;
-      x_we = 1;
-    end
-    else if (execute_state.insn_sll == 1) begin
-      // TODO: rs1_data << rs2_data[4:0]
+        x_rd = execute_state.rd;
+        x_rd_data = x_rd_data_inter;
+        x_we = 1;
+      end
 
+      InsnAnd: begin
+        x_rd = execute_state.rd;
+        x_rd_data = x_rs1_data & x_rs2_data;
+        x_we = 1;
+      end
 
-    end
-    else if (execute_state.insn_sltu == 1) begin
-    
-      x_rd = execute_state.rd;
-      x_rd_data = $unsigned(x_rs1_data) < $unsigned(x_rs2_data) ? 1 : 0;
-      x_we = 1;
-    end
-    else if (execute_state.insn_xor == 1) begin
-      x_rd = execute_state.rd;
-      x_rd_data = x_rs1_data ^ x_rs2_data;
-      x_we = 1;
-    end
-    else if (execute_state.insn_srl == 1) begin
-      // TODO: rs1_data >> rs2_data[4:0]
+      InsnOr: begin
+        x_rd = execute_state.rd;
+        x_rd_data = x_rs1_data | x_rs2_data;
+        x_we = 1;
+      end
 
-    end
-    else if (execute_state.insn_sra == 1) begin
-      // TODO: $signed(rs1_data) >>> rs2_data[4:0]
+      InsnXor: begin
+        x_rd_data = x_rs1_data ^ x_rs2_data;
+        x_we = 1;
+      end
 
-    end
-    else if (execute_state.insn_or == 1) begin
-      x_rd = execute_state.rd;
-      x_rd_data = x_rs1_data | x_rs2_data;
-      x_we = 1;
-    end
-    else if (execute_state.insn_and == 1) begin
-      x_rd = execute_state.rd;
-      x_rd_data = x_rs1_data & x_rs2_data;
-      x_we = 1;
-    end
-    // TODO: Multiplication and Division
-    else if (execute_state.insn_mul == 1) begin
-    
-    end
-    else if (execute_state.insn_mulh == 1) begin
-    
-    end
-    else if (execute_state.insn_mulhsu == 1) begin
-    
-    end
-    else if (execute_state.insn_mulhu == 1) begin
+      InsnSlt: begin
+        x_rd = execute_state.rd;
+        x_rd_data = $signed(x_rs1_data) < $signed(x_rs2_data) ? 1 : 0;
+        x_we = 1;
+      end
 
-    end
-    else if (execute_state.insn_div == 1) begin
-    
-    end
-    else if (execute_state.insn_divu == 1) begin
-    
-    end
-    else if (execute_state.insn_rem == 1) begin
-    
-    end
-    else if (execute_state.insn_remu == 1) begin
-    
-    end
-    else begin
-      x_cla_a = 0;
-      x_cla_b = 0;
+      // InsnSrl: begin
+      //   // TODO: rs1_data >> rs2_data[4:0]
+      // end
 
-      x_rd = 0;
-      x_rd_data = 0;
-      x_we = 0;
-    end
-    
+      // InsnSra: begin
+      //   // TODO: $signed(rs1_data) >>> rs2_data[4:0]
+      // end
 
-    // More instructions here...
-
+      default: begin
+        x_rd = 0;
+        x_rd_data = 0;
+        x_we = 1;
+      end
+    endcase
   end
 
   /****************/
