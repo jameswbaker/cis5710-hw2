@@ -254,9 +254,7 @@ async def testLuiAddi(dut):
 async def testAdd(dut):
     "Test the add instruction"
     asm(dut, '''
-        addi x1,x0,4
-        addi x2,x0,5
-        add x3,x1,x2''')
+        add x3, x1, x2''')
     await preTestSetup(dut)
 
     await ClockCycles(dut.clk, 7)
