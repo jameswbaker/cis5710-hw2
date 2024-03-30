@@ -203,6 +203,43 @@ async def testAddi(dut):
     assert dut.datapath.rf.regs[1].value == 9, f'failed at cycle {dut.datapath.cycles_current.value.integer}'
 
 @cocotb.test()
+async def testSlti(dut):
+    "Run one add insn"
+    asm(dut, 'slti x1,x0,9')
+    await preTestSetup(dut)
+
+    await ClockCycles(dut.clk, 6)
+    assert dut.datapath.rf.regs[1].value == 1, f'failed at cycle {dut.datapath.cycles_current.value.integer}'
+
+@cocotb.test()
+async def testXori(dut):
+    "Run one xori insn"
+    asm(dut, 'xori x1,x0,9')
+    await preTestSetup(dut)
+
+    await ClockCycles(dut.clk, 6)
+    assert dut.datapath.rf.regs[1].value == 9, f'failed at cycle {dut.datapath.cycles_current.value.integer}'
+
+@cocotb.test()
+async def testSlli(dut):
+    "Run one slli insn"
+    asm(dut, 'slli x1,x0,4')
+    await preTestSetup(dut)
+
+    await ClockCycles(dut.clk, 6)
+    assert dut.datapath.rf.regs[1].value == 0, f'failed at cycle {dut.datapath.cycles_current.value.integer}'
+
+@cocotb.test()
+async def testSrai(dut):
+    "Run one srai insn"
+    asm(dut, 'srai x1,x0,2')
+    await preTestSetup(dut)
+
+    await ClockCycles(dut.clk, 6)
+    assert dut.datapath.rf.regs[1].value == 0, f'failed at cycle {dut.datapath.cycles_current.value.integer}'
+
+
+@cocotb.test()
 async def testLuiAddi(dut):
     "Run two insns to check PC incrementing"
     asm(dut, '''
@@ -212,6 +249,18 @@ async def testLuiAddi(dut):
 
     await ClockCycles(dut.clk, 7)
     assert dut.datapath.rf.regs[1].value == 0x12345678, f'failed at cycle {dut.datapath.cycles_current.value.integer}'
+
+@cocotb.test()
+async def testAdd(dut):
+    "Test the add instruction"
+    asm(dut, '''
+        addi x1,x0,4
+        addi x2,x0,5
+        add x3,x1,x2''')
+    await preTestSetup(dut)
+
+    await ClockCycles(dut.clk, 7)
+    assert dut.datapath.rf.regs[3].value == 9, f'failed at cycle {dut.datapath.cycles_current.value.integer}'
 
 @cocotb.test()
 async def testMX1(dut):
