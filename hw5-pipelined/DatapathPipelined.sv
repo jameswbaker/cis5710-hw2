@@ -552,6 +552,19 @@ module DatapathPipelined (
   logic [`REG_SIZE] x_rd_data, x_rs1_data, x_rs2_data;
   logic x_we;
 
+  // MX and WX bypassing
+  // - First we check for a MX bypass, i.e. if x-rs1 = m-rd
+  // - Otherwise, we check for a WX bypass, i.e. if x-rs1 = w-rd
+  // - Otherwise, we just use the value we got from the register file
+  logic [`REG_SIZE] x_bp_rs1_data, x_bp_rs2_data;
+  assign x_bp_rs1_data = (execute_state.rs1 == memory_state.rd) ? memory_state.rd_data : (
+    (execute_state.rs1 == writeback_state.rd) ? writeback_state.rd_data : x_rs1_data
+  );
+  assign x_bp_rs2_data = (execute_state.rs2 == memory_state.rd) ? memory_state.rd_data : (
+    (execute_state.rs2 == writeback_state.rd) ? writeback_state.rd_data : x_rs2_data
+  );
+
+  // CLA stuff
   logic [`REG_SIZE] x_cla_a, x_cla_b;
 
   cla x_cla (
@@ -591,7 +604,7 @@ module DatapathPipelined (
       end
 
       InsnAddi: begin
-        x_cla_a = x_rs1_data;
+        x_cla_a = x_bp_rs1_data;
         x_cla_b = execute_state.imm_i_sext;
 
         x_rd = execute_state.rd;
@@ -601,31 +614,31 @@ module DatapathPipelined (
 
       InsnSlti: begin
         x_rd = execute_state.rd;
-        x_rd_data = $signed(x_rs1_data) < $signed(execute_state.imm_i_sext) ? 1 : 0;
+        x_rd_data = $signed(x_bp_rs1_data) < $signed(execute_state.imm_i_sext) ? 1 : 0;
         x_we = 1;
       end
 
       InsnSltiu: begin
         x_rd = execute_state.rd;
-        x_rd_data = $unsigned(x_rs1_data) < $unsigned(execute_state.imm_i_sext) ? 1 : 0;
+        x_rd_data = $unsigned(x_bp_rs1_data) < $unsigned(execute_state.imm_i_sext) ? 1 : 0;
         x_we = 1;
       end
 
       InsnXori: begin
         x_rd = execute_state.rd;
-        x_rd_data = x_rs1_data ^ execute_state.imm_i_sext;
+        x_rd_data = x_bp_rs1_data ^ execute_state.imm_i_sext;
         x_we = 1;
       end
 
       InsnOri: begin
         x_rd = execute_state.rd;
-        x_rd_data = x_rs1_data | execute_state.imm_i_sext;
+        x_rd_data = x_bp_rs1_data | execute_state.imm_i_sext;
         x_we = 1;
       end
 
       InsnAndi: begin
         x_rd = execute_state.rd;
-        x_rd_data = x_rs1_data & execute_state.imm_i_sext;
+        x_rd_data = x_bp_rs1_data & execute_state.imm_i_sext;
         x_we = 1;
       end
 
@@ -633,31 +646,31 @@ module DatapathPipelined (
         // Note: To fix this I implemented a new thing in decode/execute stage: d_imm_i_4_0. in decode stage it takes [4:0] from d_imm_i
 
         x_rd = execute_state.rd;
-        x_rd_data = x_rs1_data << execute_state.imm_i_4_0;
+        x_rd_data = x_bp_rs1_data << execute_state.imm_i_4_0;
         x_we = 1;
       end
 
       InsnSrli: begin
         x_rd = execute_state.rd;
-        x_rd_data = x_rs1_data >> execute_state.imm_i_4_0;
+        x_rd_data = x_bp_rs1_data >> execute_state.imm_i_4_0;
         x_we = 1;
       end
 
       InsnSrai: begin
         x_rd = execute_state.rd;
-        x_rd_data = $signed(x_rs1_data) >>> execute_state.imm_i_4_0;
+        x_rd_data = $signed(x_bp_rs1_data) >>> execute_state.imm_i_4_0;
         x_we = 1;
       end
 
       InsnSltu: begin
         x_rd = execute_state.rd;
-        x_rd_data = $unsigned(x_rs1_data) < $unsigned(x_rs2_data) ? 1 : 0;
+        x_rd_data = $unsigned(x_bp_rs1_data) < $unsigned(x_bp_rs2_data) ? 1 : 0;
         x_we = 1;
       end
 
       InsnAdd: begin
-        x_cla_a = x_rs1_data;
-        x_cla_b = x_rs2_data;
+        x_cla_a = x_bp_rs1_data;
+        x_cla_b = x_bp_rs2_data;
         x_cla_inc_in = 0;
 
         x_rd = execute_state.rd;
@@ -666,12 +679,12 @@ module DatapathPipelined (
       end
 
       InsnSub: begin
-        x_cla_inc_in = ~x_rs2_data;  // invert all the bits
+        x_cla_inc_in = ~x_bp_rs2_data;  // invert all the bits
         x_cla_b = x_cla_inc_out;  // add 1
 
-        x_cla_a = x_rs1_data;
+        x_cla_a = x_bp_rs1_data;
         x_cla_b = x_cla_inc_out;
-        x_cla_inc_in = ~x_rs2_data;
+        x_cla_inc_in = ~x_bp_rs2_data;
 
         x_rd = execute_state.rd;
         x_rd_data = x_rd_data_inter;
@@ -680,24 +693,24 @@ module DatapathPipelined (
 
       InsnAnd: begin
         x_rd = execute_state.rd;
-        x_rd_data = x_rs1_data & x_rs2_data;
+        x_rd_data = x_bp_rs1_data & x_bp_rs2_data;
         x_we = 1;
       end
 
       InsnOr: begin
         x_rd = execute_state.rd;
-        x_rd_data = x_rs1_data | x_rs2_data;
+        x_rd_data = x_bp_rs1_data | x_bp_rs2_data;
         x_we = 1;
       end
 
       InsnXor: begin
-        x_rd_data = x_rs1_data ^ x_rs2_data;
+        x_rd_data = x_bp_rs1_data ^ x_bp_rs2_data;
         x_we = 1;
       end
 
       InsnSlt: begin
         x_rd = execute_state.rd;
-        x_rd_data = $signed(x_rs1_data) < $signed(x_rs2_data) ? 1 : 0;
+        x_rd_data = $signed(x_bp_rs1_data) < $signed(x_bp_rs2_data) ? 1 : 0;
         x_we = 1;
       end
 
