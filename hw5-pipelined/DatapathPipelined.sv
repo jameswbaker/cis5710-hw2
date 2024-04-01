@@ -137,6 +137,8 @@ typedef struct packed {
   logic [`INSN_SIZE] insn;
   cycle_status_e cycle_status;
 
+  logic [`REG_SIZE] flush_to_pc;
+
   logic [4:0] rd;
   logic [`REG_SIZE] rd_data;
 
@@ -755,53 +757,65 @@ module DatapathPipelined (
         x_we = 0;
         if (x_bp_rs1_data == x_bp_rs2_data) begin
           x_pc = execute_state.pc + execute_state.imm_b_sext;
+          
+          // flush Fetch and Decode insns
+          // might need to make intermediate logics for these
+          f_cycle_status = CYCLE_TAKEN_BRANCH;
+          // set f_pc_current in memory stage
+          f_insn = 0;
+          f_pc_current = 0;
+
+          decode_state.cycle_status = CYCLE_TAKEN_BRANCH;
+          decode_state.insn = 0;
+          decode_state.pc = 0;
+
         end
       end
 
-      InsnBne: begin
-        x_rd = 0;
-        x_rd_data = 0;
-        x_we = 0;
-        if (x_bp_rs1_data != x_bp_rs2_data) begin
-          x_pc = execute_state.pc + execute_state.imm_b_sext;
-        end
-      end
+      // InsnBne: begin
+      //   x_rd = 0;
+      //   x_rd_data = 0;
+      //   x_we = 0;
+      //   if (x_bp_rs1_data != x_bp_rs2_data) begin
+      //     x_pc = execute_state.pc + execute_state.imm_b_sext;
+      //   end
+      // end
 
-      InsnBlt: begin
-        x_rd = 0;
-        x_rd_data = 0;
-        x_we = 0;
-        if ($signed(x_bp_rs1_data) < $signed(x_bp_rs2_data)) begin
-          x_pc = execute_state.pc + execute_state.imm_b_sext;
-        end
-      end
+      // InsnBlt: begin
+      //   x_rd = 0;
+      //   x_rd_data = 0;
+      //   x_we = 0;
+      //   if ($signed(x_bp_rs1_data) < $signed(x_bp_rs2_data)) begin
+      //     x_pc = execute_state.pc + execute_state.imm_b_sext;
+      //   end
+      // end
 
-      InsnBge: begin
-        x_rd = 0;
-        x_rd_data = 0;
-        x_we = 0;
-        if ($signed(x_bp_rs1_data) >= $signed(x_bp_rs2_data)) begin
-          x_pc = execute_state.pc + execute_state.imm_b_sext;
-        end
-      end
+      // InsnBge: begin
+      //   x_rd = 0;
+      //   x_rd_data = 0;
+      //   x_we = 0;
+      //   if ($signed(x_bp_rs1_data) >= $signed(x_bp_rs2_data)) begin
+      //     x_pc = execute_state.pc + execute_state.imm_b_sext;
+      //   end
+      // end
 
-      InsnBltu: begin
-        x_rd = 0;
-        x_rd_data = 0;
-        x_we = 0;
-        if ($unsigned(x_bp_rs1_data) < $unsigned(x_bp_rs2_data)) begin
-          x_pc = execute_state.pc + execute_state.imm_b_sext;
-        end
-      end
+      // InsnBltu: begin
+      //   x_rd = 0;
+      //   x_rd_data = 0;
+      //   x_we = 0;
+      //   if ($unsigned(x_bp_rs1_data) < $unsigned(x_bp_rs2_data)) begin
+      //     x_pc = execute_state.pc + execute_state.imm_b_sext;
+      //   end
+      // end
 
-      InsnBgeu: begin
-        x_rd = 0;
-        x_rd_data = 0;
-        x_we = 0;
-        if ($unsigned(x_bp_rs1_data) >= $unsigned(x_bp_rs2_data)) begin
-          x_pc = execute_state.pc + execute_state.imm_b_sext;
-        end
-      end
+      // InsnBgeu: begin
+      //   x_rd = 0;
+      //   x_rd_data = 0;
+      //   x_we = 0;
+      //   if ($unsigned(x_bp_rs1_data) >= $unsigned(x_bp_rs2_data)) begin
+      //     x_pc = execute_state.pc + execute_state.imm_b_sext;
+      //   end
+      // end
 
       default: begin
         x_rd = 0;
@@ -818,13 +832,15 @@ module DatapathPipelined (
   stage_memory_t memory_state;
   always_ff @(posedge clk) begin
     if (rst) begin
-      memory_state <= '{pc: 0, insn: 0, cycle_status: CYCLE_RESET, rd: 0, rd_data: 0, we: 0};
+      memory_state <= '{pc: 0, insn: 0, cycle_status: CYCLE_RESET, flush_to_pc: 0, rd: 0, rd_data: 0, we: 0};
     end else begin
       begin
         memory_state <= '{
             pc: x_pc,
             insn: execute_state.insn,
             cycle_status: execute_state.cycle_status,
+
+            flush_to_pc: x_pc,
 
             rd: x_rd,
             rd_data: x_rd_data,
@@ -841,6 +857,8 @@ module DatapathPipelined (
       .insn  (execute_state.insn),
       .disasm(m_disasm)
   );
+
+  assign f_pc_current = memory_state.flush_to_pc;
 
   /*******************/
   /* WRITEBACK STAGE */
