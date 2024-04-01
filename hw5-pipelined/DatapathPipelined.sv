@@ -126,6 +126,7 @@ typedef struct packed {
   logic [19:0] imm_u;
   logic [4:0] imm_i_4_0;
   logic [`REG_SIZE] imm_i_sext;
+  logic [`REG_SIZE] imm_b_sext;
 
   logic [`INSN_NAME_SIZE] insn_name;
 } stage_execute_t;
@@ -509,6 +510,7 @@ module DatapathPipelined (
           imm_u: 0,
           imm_i_4_0: 0,
           imm_i_sext: 0,
+          imm_b_sext: 0,
 
           insn_name: 0
       };
@@ -526,6 +528,7 @@ module DatapathPipelined (
             imm_u: d_imm_u,
             imm_i_4_0: d_imm_i_4_0,
             imm_i_sext: d_imm_i_sext,
+            imm_b_sext: d_imm_b_sext,
 
             insn_name: d_insn_name
         };
@@ -550,7 +553,9 @@ module DatapathPipelined (
   logic [4:0] x_rs1, x_rd;
   logic [`REG_SIZE] x_rd_data_inter;
   logic [`REG_SIZE] x_rd_data, x_rs1_data, x_rs2_data;
+  logic [4:0] x_rs2_data_4_0;
   logic x_we;
+  logic [`REG_SIZE] x_pc;
 
   // MX and WX bypassing
   // - First we check for a MX bypass, i.e. if x-rs1 = m-rd
@@ -563,6 +568,7 @@ module DatapathPipelined (
   assign x_bp_rs2_data = (execute_state.rs2 == memory_state.rd) ? memory_state.rd_data : (
     (execute_state.rs2 == writeback_state.rd) ? writeback_state.rd_data : x_rs2_data
   );
+  assign x_rs2_data_4_0 = x_bp_rs2_data[4:0];
 
   // CLA stuff
   logic [`REG_SIZE] x_cla_a, x_cla_b;
@@ -595,8 +601,12 @@ module DatapathPipelined (
     x_cla_inc_in = 0;
     x_cla_a = 0;
     x_cla_b = 0;
+    x_pc = execute_state.pc;
 
     case (execute_state.insn_name)
+
+      // Arithmetic Insns
+
       InsnLui: begin
         x_rd = execute_state.rd;
         x_rd_data = {execute_state.imm_u, 12'b0};
@@ -714,13 +724,84 @@ module DatapathPipelined (
         x_we = 1;
       end
 
-      // InsnSrl: begin
-      //   // TODO: rs1_data >> rs2_data[4:0]
-      // end
+      InsnSrl: begin
+        // rs1_data >> rs2_data[4:0]
+        x_rd = execute_state.rd;
+        x_rd_data = x_bp_rs1_data >> x_rs2_data_4_0;
+        x_we = 1;
+      end
 
-      // InsnSra: begin
-      //   // TODO: $signed(rs1_data) >>> rs2_data[4:0]
-      // end
+      InsnSra: begin
+        // $signed(rs1_data) >>> rs2_data[4:0]
+        x_rd = execute_state.rd;
+        x_rd_data = x_bp_rs1_data >>> x_rs2_data_4_0;
+        x_we = 1;
+      end
+
+
+
+      // Branch Insns
+
+      /* 
+        On a taken branch, your datapath will flush the instructions in Fetch and Decode 
+        (replacing them with NOPs/bubbles) and then fetch the correct-path instruction 
+        in the following cycle (when the branch moves to the Memory stage). The pipelining 
+        lecture slides discuss the cycle timing in detail.
+      */
+
+      InsnBeq: begin
+        x_rd = 0;
+        x_rd_data = 0;
+        x_we = 0;
+        if (x_bp_rs1_data == x_bp_rs2_data) begin
+          x_pc = execute_state.pc + execute_state.imm_b_sext;
+        end
+      end
+
+      InsnBne: begin
+        x_rd = 0;
+        x_rd_data = 0;
+        x_we = 0;
+        if (x_bp_rs1_data != x_bp_rs2_data) begin
+          x_pc = execute_state.pc + execute_state.imm_b_sext;
+        end
+      end
+
+      InsnBlt: begin
+        x_rd = 0;
+        x_rd_data = 0;
+        x_we = 0;
+        if ($signed(x_bp_rs1_data) < $signed(x_bp_rs2_data)) begin
+          x_pc = execute_state.pc + execute_state.imm_b_sext;
+        end
+      end
+
+      InsnBge: begin
+        x_rd = 0;
+        x_rd_data = 0;
+        x_we = 0;
+        if ($signed(x_bp_rs1_data) >= $signed(x_bp_rs2_data)) begin
+          x_pc = execute_state.pc + execute_state.imm_b_sext;
+        end
+      end
+
+      InsnBltu: begin
+        x_rd = 0;
+        x_rd_data = 0;
+        x_we = 0;
+        if ($unsigned(x_bp_rs1_data) < $unsigned(x_bp_rs2_data)) begin
+          x_pc = execute_state.pc + execute_state.imm_b_sext;
+        end
+      end
+
+      InsnBgeu: begin
+        x_rd = 0;
+        x_rd_data = 0;
+        x_we = 0;
+        if ($unsigned(x_bp_rs1_data) >= $unsigned(x_bp_rs2_data)) begin
+          x_pc = execute_state.pc + execute_state.imm_b_sext;
+        end
+      end
 
       default: begin
         x_rd = 0;
@@ -741,7 +822,7 @@ module DatapathPipelined (
     end else begin
       begin
         memory_state <= '{
-            pc: execute_state.pc,
+            pc: x_pc,
             insn: execute_state.insn,
             cycle_status: execute_state.cycle_status,
 
