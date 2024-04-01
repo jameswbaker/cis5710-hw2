@@ -137,8 +137,6 @@ typedef struct packed {
   logic [`INSN_SIZE] insn;
   cycle_status_e cycle_status;
 
-  logic [`REG_SIZE] flush_to_pc;
-
   logic [4:0] rd;
   logic [`REG_SIZE] rd_data;
 
@@ -243,7 +241,7 @@ module DatapathPipelined (
       // NB: use CYCLE_NO_STALL since this is the value that will persist after the last reset cycle
       f_cycle_status <= CYCLE_NO_STALL;
     end else if (x_branching) begin
-      f_pc_current   <= x_pc;
+      f_pc_current   <= x_branch_pc;
       f_cycle_status <= CYCLE_NO_STALL;
     end else begin
       f_cycle_status <= CYCLE_NO_STALL;
@@ -586,7 +584,7 @@ module DatapathPipelined (
   logic x_halt;
 
   // For branching
-  logic [`REG_SIZE] x_pc;
+  logic [`REG_SIZE] x_branch_pc;
   logic x_branching;
 
   // MX and WX bypassing
@@ -638,7 +636,7 @@ module DatapathPipelined (
 
     // Branching
     x_branching = 0;
-    x_pc = execute_state.pc;
+    x_branch_pc = execute_state.pc;
 
     case (execute_state.insn_name)
 
@@ -797,7 +795,7 @@ module DatapathPipelined (
         x_we = 0;
 
         if (x_bp_rs1_data == x_bp_rs2_data) begin
-          x_pc = execute_state.pc + execute_state.imm_b_sext;
+          x_branch_pc = execute_state.pc + execute_state.imm_b_sext;
           x_branching = 1;
         end
       end
@@ -808,7 +806,7 @@ module DatapathPipelined (
         x_we = 0;
 
         if (x_bp_rs1_data != x_bp_rs2_data) begin
-          x_pc = execute_state.pc + execute_state.imm_b_sext;
+          x_branch_pc = execute_state.pc + execute_state.imm_b_sext;
           x_branching = 1;
         end
       end
@@ -819,7 +817,7 @@ module DatapathPipelined (
         x_we = 0;
 
         if ($signed(x_bp_rs1_data) < $signed(x_bp_rs2_data)) begin
-          x_pc = execute_state.pc + execute_state.imm_b_sext;
+          x_branch_pc = execute_state.pc + execute_state.imm_b_sext;
           x_branching = 1;
         end
       end
@@ -829,7 +827,7 @@ module DatapathPipelined (
         x_rd_data = 0;
         x_we = 0;
         if ($signed(x_bp_rs1_data) >= $signed(x_bp_rs2_data)) begin
-          x_pc = execute_state.pc + execute_state.imm_b_sext;
+          x_branch_pc = execute_state.pc + execute_state.imm_b_sext;
           x_branching = 1;
         end
       end
@@ -839,7 +837,7 @@ module DatapathPipelined (
         x_rd_data = 0;
         x_we = 0;
         if ($unsigned(x_bp_rs1_data) < $unsigned(x_bp_rs2_data)) begin
-          x_pc = execute_state.pc + execute_state.imm_b_sext;
+          x_branch_pc = execute_state.pc + execute_state.imm_b_sext;
           x_branching = 1;
         end
       end
@@ -849,7 +847,7 @@ module DatapathPipelined (
         x_rd_data = 0;
         x_we = 0;
         if ($unsigned(x_bp_rs1_data) >= $unsigned(x_bp_rs2_data)) begin
-          x_pc = execute_state.pc + execute_state.imm_b_sext;
+          x_branch_pc = execute_state.pc + execute_state.imm_b_sext;
           x_branching = 1;
         end
       end
@@ -881,8 +879,6 @@ module DatapathPipelined (
           insn: 0,
           cycle_status: CYCLE_RESET,
 
-          flush_to_pc: 0,
-
           rd: 0,
           rd_data: 0,
 
@@ -892,11 +888,9 @@ module DatapathPipelined (
     end else begin
       begin
         memory_state <= '{
-            pc: x_pc,
+            pc: execute_state.pc,  // Even if we branch, we should propagate the old pc here
             insn: execute_state.insn,
             cycle_status: execute_state.cycle_status,
-
-            flush_to_pc: x_pc,
 
             rd: x_rd,
             rd_data: x_rd_data,
