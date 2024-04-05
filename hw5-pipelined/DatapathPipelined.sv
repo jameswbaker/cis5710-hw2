@@ -140,6 +140,11 @@ typedef struct packed {
   logic [4:0] rd;
   logic [`REG_SIZE] rd_data;
 
+  logic [`REG_SIZE] unaligned_addr_to_dmem;
+  logic [`REG_SIZE] addr_to_dmem;
+
+  logic [5:0] insn_name;
+
   logic we;
   logic halt;
 } stage_memory_t;
@@ -199,21 +204,6 @@ module DatapathPipelined (
       .rst(rst)
   );
 
-  // opcodes - see section 19 of RiscV spec
-  // localparam bit [`OPCODE_SIZE] OpcodeLoad = 7'b00_000_11;
-  // localparam bit [`OPCODE_SIZE] OpcodeStore = 7'b01_000_11;
-  // localparam bit [`OPCODE_SIZE] OpcodeBranch = 7'b11_000_11;
-  // localparam bit [`OPCODE_SIZE] OpcodeJalr = 7'b11_001_11;
-  // localparam bit [`OPCODE_SIZE] OpcodeMiscMem = 7'b00_011_11;
-  // localparam bit [`OPCODE_SIZE] OpcodeJal = 7'b11_011_11;
-
-  // localparam bit [`OPCODE_SIZE] OpcodeRegImm = 7'b00_100_11;
-  // localparam bit [`OPCODE_SIZE] OpcodeRegReg = 7'b01_100_11;
-  // localparam bit [`OPCODE_SIZE] OpcodeEnviron = 7'b11_100_11;
-
-  // localparam bit [`OPCODE_SIZE] OpcodeAuipc = 7'b00_101_11;
-  // localparam bit [`OPCODE_SIZE] OpcodeLui = 7'b01_101_11;
-
   // cycle counter, not really part of any stage but useful for orienting within GtkWave
   // do not rename this as the testbench uses this value
   // DON'T TOUCH THIS
@@ -243,6 +233,9 @@ module DatapathPipelined (
     end else if (x_branching) begin
       f_pc_current   <= x_branch_pc;
       f_cycle_status <= CYCLE_NO_STALL;
+    end else if (x_load_stall) begin
+      f_cycle_status <= CYCLE_NO_STALL;
+      f_pc_current   <= f_pc_current;
     end else begin
       f_cycle_status <= CYCLE_NO_STALL;
       f_pc_current   <= f_pc_current + 4;
@@ -273,6 +266,8 @@ module DatapathPipelined (
       decode_state <= '{pc: 0, insn: 0, cycle_status: CYCLE_RESET};
     end else if (x_branching) begin
       decode_state <= '{pc: 0, insn: 0, cycle_status: CYCLE_TAKEN_BRANCH};
+    end else if (x_load_stall) begin
+      decode_state <= '{pc: f_pc_current, insn: f_insn, cycle_status: CYCLE_NO_STALL};
     end else begin
       begin
         decode_state <= '{pc: f_pc_current, insn: f_insn, cycle_status: f_cycle_status};
@@ -522,6 +517,23 @@ module DatapathPipelined (
 
           insn_name: 0
       };
+    end else if (x_load_stall) begin
+      execute_state <= '{
+          pc: 0,
+          insn: 0,
+          cycle_status: CYCLE_LOAD2USE,
+
+          rs1: 0,
+          rs2: 0,
+          rd: 0,
+
+          imm_u: 0,
+          imm_i_4_0: 0,
+          imm_i_sext: 0,
+          imm_b_sext: 0,
+
+          insn_name: 0
+      };
     end else if (x_branching) begin
       execute_state <= '{
           pc: 0,
@@ -620,6 +632,40 @@ module DatapathPipelined (
       .sum(x_cla_inc_out)
   );
 
+  // Loads
+  logic x_is_load_insn;
+  always_comb begin
+    if (execute_state.insn_name == InsnLb) begin
+      assign x_is_load_insn = 1;
+    end else if (execute_state.insn_name == InsnLbu) begin
+      assign x_is_load_insn = 1;
+    end else if (execute_state.insn_name == InsnLh) begin
+      assign x_is_load_insn = 1;
+    end else if (execute_state.insn_name == InsnLhu) begin
+      assign x_is_load_insn = 1;
+    end else if (execute_state.insn_name == InsnLw) begin
+      assign x_is_load_insn = 1;
+    end else begin
+      assign x_is_load_insn = 0;
+    end
+  end
+
+  // logic x_load_stall = x_is_load_insn && (execute_state.rd == d_insn_rs1 || execute_state.rd == d_insn_rs2);
+
+  logic x_load_stall;
+  always_comb begin
+    if (x_is_load_insn && (execute_state.rd == d_insn_rs1)) begin
+      assign x_load_stall = 1;
+    end else if (x_is_load_insn && (execute_state.rd == d_insn_rs2)) begin
+      assign x_load_stall = 1;
+    end else begin
+      assign x_load_stall = 0;
+    end
+  end
+
+  logic [`REG_SIZE] x_unaligned_addr_to_dmem;
+  logic [`REG_SIZE] x_addr_to_dmem;
+
   // // //
   // EXECUTE: Logic
   // // //
@@ -638,10 +684,15 @@ module DatapathPipelined (
     x_branching = 0;
     x_branch_pc = execute_state.pc;
 
+    // Loads
+    x_unaligned_addr_to_dmem = 0;
+    x_addr_to_dmem = 0;
+
+
+    // Perform arithmetic based on instruction
     case (execute_state.insn_name)
 
       // Arithmetic Insns
-
       InsnLui: begin
         x_rd = execute_state.rd;
         x_rd_data = {execute_state.imm_u, 12'b0};
@@ -778,8 +829,6 @@ module DatapathPipelined (
         x_we = 1;
       end
 
-
-
       // Branch Insns
 
       /* 
@@ -852,6 +901,36 @@ module DatapathPipelined (
         end
       end
 
+      /* LOAD INSNS */
+      InsnLb: begin
+        x_rd = execute_state.rd;
+        x_we = 1;
+
+        // Set address
+        x_unaligned_addr_to_dmem = $signed(x_bp_rs1_data) + $signed(execute_state.imm_i_sext);
+        x_addr_to_dmem = {x_unaligned_addr_to_dmem[31:2], 2'b0};
+      end
+
+      // InsnLh: begin
+      // end
+
+      InsnLw: begin
+        x_rd = execute_state.rd;
+        x_we = 1;
+
+        // Set address
+        x_unaligned_addr_to_dmem = $signed(x_bp_rs1_data) + $signed(execute_state.imm_i_sext);
+        x_addr_to_dmem = x_unaligned_addr_to_dmem;
+      end
+
+      // InsnLbu: begin
+      // end
+
+      // InsnLhu: begin
+      // end
+
+      /* MISC INSNS */
+
       InsnFence: begin
         x_we = 0;
       end
@@ -882,6 +961,11 @@ module DatapathPipelined (
           rd: 0,
           rd_data: 0,
 
+          insn_name: 0,
+
+          unaligned_addr_to_dmem: 0,
+          addr_to_dmem: 0,
+
           we: 0,
           halt: 0
       };
@@ -894,6 +978,11 @@ module DatapathPipelined (
 
             rd: x_rd,
             rd_data: x_rd_data,
+
+            insn_name: execute_state.insn_name,
+
+            unaligned_addr_to_dmem: x_unaligned_addr_to_dmem,
+            addr_to_dmem: x_addr_to_dmem,
 
             we: x_we,
             halt: x_halt
@@ -908,6 +997,54 @@ module DatapathPipelined (
       .insn  (execute_state.insn),
       .disasm(m_disasm)
   );
+
+  /* LOAD INSNS */
+  logic [`REG_SIZE] m_rd_data;
+  logic [`REG_SIZE] m_addr_to_dmem;
+
+  always_comb begin
+    m_addr_to_dmem = 0;
+
+    case (memory_state.insn_name)
+      InsnLb: begin
+        m_addr_to_dmem = memory_state.addr_to_dmem;
+
+        // Choose which byte of the loaded word to take
+        // We also need to sign-extend our result manually
+        case (memory_state.addr_to_dmem[1:0])
+          2'b00: begin
+            m_rd_data = {{24{load_data_from_dmem[7]}}, load_data_from_dmem[7:0]};
+          end
+          2'b01: begin
+            m_rd_data = {{24{load_data_from_dmem[15]}}, load_data_from_dmem[15:8]};
+          end
+          2'b10: begin
+            m_rd_data = {{24{load_data_from_dmem[23]}}, load_data_from_dmem[23:16]};
+          end
+          2'b11: begin
+            m_rd_data = {{24{load_data_from_dmem[31]}}, load_data_from_dmem[31:24]};
+          end
+          default: begin
+          end
+        endcase
+      end
+
+      InsnLw: begin
+        if (memory_state.unaligned_addr_to_dmem[1:0] == 2'b0) begin
+          m_rd_data = load_data_from_dmem;
+          m_addr_to_dmem = memory_state.addr_to_dmem;
+        end
+      end
+
+      default: begin
+        m_rd_data = memory_state.rd_data;
+      end
+    endcase
+  end
+
+  // Update addr_to_dmem
+  assign addr_to_dmem = m_addr_to_dmem;
+
 
   /*******************/
   /* WRITEBACK STAGE */
@@ -935,7 +1072,7 @@ module DatapathPipelined (
             cycle_status: memory_state.cycle_status,
 
             rd: memory_state.rd,
-            rd_data: memory_state.rd_data,
+            rd_data: m_rd_data,
 
             we: memory_state.we,
             halt: memory_state.halt
@@ -970,7 +1107,6 @@ module DatapathPipelined (
     end
 
     // More instructions here...
-
 
     // Set halt appropriately
     halt = writeback_state.halt;
