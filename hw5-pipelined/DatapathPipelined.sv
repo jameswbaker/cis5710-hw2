@@ -138,13 +138,15 @@ typedef struct packed {
   cycle_status_e cycle_status;
 
   logic [4:0] rd;
+  logic [4:0] rs2;
+
   logic [`REG_SIZE] rd_data;
   logic [`REG_SIZE] rs2_data;
 
-  logic [`REG_SIZE] unaligned_addr_to_dmem;
   logic [`REG_SIZE] addr_to_dmem;
 
   logic [5:0] insn_name;
+  logic is_load_insn;
 
   logic we;
   logic halt;
@@ -158,6 +160,8 @@ typedef struct packed {
 
   logic [4:0] rd;
   logic [`REG_SIZE] rd_data;
+
+  logic is_load_insn;
 
   logic we;
   logic halt;
@@ -992,10 +996,12 @@ module DatapathPipelined (
           cycle_status: CYCLE_RESET,
 
           rd: 0,
+          rs2: 0,
           rd_data: 0,
           rs2_data: 0,
 
           insn_name: 0,
+          is_load_insn: 0,
 
           addr_to_dmem: 0,
 
@@ -1010,10 +1016,12 @@ module DatapathPipelined (
             cycle_status: execute_state.cycle_status,
 
             rd: x_rd,
+            rs2: execute_state.rs2,
             rd_data: x_rd_data,
             rs2_data: x_bp_rs2_data,
 
             insn_name: execute_state.insn_name,
+            is_load_insn: x_is_load_insn,
 
             addr_to_dmem: x_addr_to_dmem,
 
@@ -1033,7 +1041,28 @@ module DatapathPipelined (
 
 
   logic [`REG_SIZE] m_rd_data;
+  logic [`REG_SIZE] m_bp_rs2_data;
   logic [`REG_SIZE] m_addr_to_dmem;
+
+  logic m_is_save_insn;
+  always_comb begin
+    if (memory_state.insn_name == InsnSb) begin
+      assign m_is_save_insn = 1;
+    end else if (memory_state.insn_name == InsnSh) begin
+      assign m_is_save_insn = 1;
+    end else if (memory_state.insn_name == InsnSw) begin
+      assign m_is_save_insn = 1;
+    end else begin
+      assign m_is_save_insn = 0;
+    end
+  end
+
+  // MW bypassing
+  // Checks:
+  // - Writeback state has a load insn
+  // - Memory state has a save insn
+  // - rs2 in memory state is rd in writeback state
+  assign m_bp_rs2_data = ((memory_state.rs2 == writeback_state.rd) && writeback_state.is_load_insn && m_is_save_insn) ? writeback_state.rd_data : memory_state.rs2_data;
 
   always_comb begin
     m_addr_to_dmem = 0;
@@ -1089,7 +1118,7 @@ module DatapathPipelined (
 
       InsnLh: begin
         // Only allow aligned addresses (last bit must be 0)
-        if (memory_state.x_addr_to_dmem[0] == 0) begin
+        if (memory_state.addr_to_dmem[0] == 0) begin
           m_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
 
           case (memory_state.addr_to_dmem[1])
@@ -1107,7 +1136,7 @@ module DatapathPipelined (
 
       InsnLhu: begin
         // Only allow aligned addresses (last bit must be 0)
-        if (memory_state.x_addr_to_dmem[0] == 0) begin
+        if (memory_state.addr_to_dmem[0] == 0) begin
           m_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
 
           case (memory_state.addr_to_dmem[1])
@@ -1138,19 +1167,19 @@ module DatapathPipelined (
         case (memory_state.addr_to_dmem[1:0])
           2'b00: begin
             store_we_to_dmem   = 4'b0001;
-            store_data_to_dmem = {24'b0, memory_state.rs2_data[7:0]};
+            store_data_to_dmem = {24'b0, m_bp_rs2_data[7:0]};
           end
           2'b01: begin
             store_we_to_dmem   = 4'b0010;
-            store_data_to_dmem = {16'b0, memory_state.rs2_data[7:0], 8'b0};
+            store_data_to_dmem = {16'b0, m_bp_rs2_data[7:0], 8'b0};
           end
           2'b10: begin
             store_we_to_dmem   = 4'b0100;
-            store_data_to_dmem = {8'b0, memory_state.rs2_data[7:0], 16'b0};
+            store_data_to_dmem = {8'b0, m_bp_rs2_data[7:0], 16'b0};
           end
           2'b11: begin
             store_we_to_dmem   = 4'b1000;
-            store_data_to_dmem = {memory_state.rs2_data[7:0], 24'b0};
+            store_data_to_dmem = {m_bp_rs2_data[7:0], 24'b0};
           end
           default: begin
           end
@@ -1165,11 +1194,11 @@ module DatapathPipelined (
           case (memory_state.addr_to_dmem[1])
             1'b0: begin
               store_we_to_dmem   = 4'b0011;
-              store_data_to_dmem = {16'b0, memory_state.rs2_data[15:0]};
+              store_data_to_dmem = {16'b0, m_bp_rs2_data[15:0]};
             end
             1'b1: begin
               store_we_to_dmem   = 4'b1100;
-              store_data_to_dmem = {memory_state.rs2_data[15:0], 16'b0};
+              store_data_to_dmem = {m_bp_rs2_data[15:0], 16'b0};
             end
             default: begin
             end
@@ -1179,9 +1208,9 @@ module DatapathPipelined (
 
       InsnSw: begin
         if (memory_state.addr_to_dmem[1:0] == 2'b0) begin
-          addr_to_dmem = unaligned_addr_to_dmem;
+          m_addr_to_dmem = memory_state.addr_to_dmem;
           store_we_to_dmem = 4'b1111;
-          store_data_to_dmem = memory_state.rs2_data;
+          store_data_to_dmem = m_bp_rs2_data;
         end
       end
 
@@ -1210,6 +1239,8 @@ module DatapathPipelined (
           rd: 0,
           rd_data: 0,
 
+          is_load_insn: 0,
+
           we: memory_state.we,
           halt: memory_state.halt
       };
@@ -1222,6 +1253,8 @@ module DatapathPipelined (
 
             rd: memory_state.rd,
             rd_data: m_rd_data,
+
+            is_load_insn: memory_state.is_load_insn,
 
             we: memory_state.we,
             halt: memory_state.halt

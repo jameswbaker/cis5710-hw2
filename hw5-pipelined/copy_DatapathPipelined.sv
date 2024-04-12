@@ -644,96 +644,48 @@ module DatapathPipelined (
   // );
 
   /*
-    Back in DatapathMultiCycle, we used the following:
-    
-    flag_multi_insn: flag that is set when we are in the middle of a multi insn
-    it is 0 if we are not in the middle of a division operation
-    it is 1 if we are in the second cycle of a dision operation
+    skip plugging into memory stage
+    our "memory cycle" will be the second cycle of the div operation
+    pass the found quotient of the div to the writeback stage
 
-    if you're in the middle of a multi_insn,
-    * don't increment PC
-    If you are not in a multi_insn then IF is_multi is 1
-      set flag_multi_insn to 1
 
-    is_multi: if the insn fetched is an insn which takes more than 1 cycle (div, divu, rem, remu)
-    it is 0 if the insn is not a multi-cycle insn
-    it is 1 if the insn is a multi-cycle insn
-    
-    if we enter into the division operation execute,
-    and we are in the first cycle of the division operation (flag_multi_insn == 0)
-    then we updated rs1 and rs2 wires
-    if we enter into the division operation execute,
-    but we are in the second cycle of the division operation (flag_multi_insn == 1)
-    then we updated rd_data without quotient
+    for this type of dependency, our standard MX bypass stall should work
 
-    //
+    1. set flag in execute or memory stage
+    2. Enter into DIV, set the div modules rs1_data and rs2_data
+    3. When its DIV then we will not pass rd_data into memory stage
+      pass everything else into memory module tho
+            pc: execute_state.pc,
+            insn: execute_state.insn,
+            cycle_status: execute_state.cycle_status,
+            rd: x_rd,
+            rd_data: x_rd_data,
+            rs2_data: x_bp_rs2_data,
+            insn_name: execute_state.insn_name,
+            addr_to_dmem: x_addr_to_dmem,
+            we: x_we,
+            halt: x_halt
+    4. then the writeback module will have
+      all the stuff from that insn
+      but we will override rd_data and make it the current quotient from the div module
+        pc: memory_state.pc,
+        insn: memory_state.insn,
+        cycle_status: memory_state.cycle_status,
+        rd: memory_state.rd,
+        rd_data: o_quotient,
+        we: memory_state.we,
+        halt: memory_state.halt
 
-    Now we have                                 Cycle 1 ----------------- Cycle 2 -----------------
-    F       - DIV insn is fetched: 
-            pc_to_imem = f_pc_current
-            f_insn = insn_from_imem
-            f_cycle_status
+    "divide-to-use" stall
+    EX: DIV R1, R2, R3     ADD R4, R1, R2
+     ( need result of DIV in R1 to do ADD. so we have to wait for DIV writeback before ADD X)
 
-                                                DIV R1, R2, R3            ADD R4, R1, R2
-            
-    D       - DIV insn is decoded:
-            decode_state.pc
-            decode_state.insn                   -> set is_multi to 1
-            decode_state.cycle_status
-            d_insn_rs1
-            d_insn_rs2
-            d_insn_rd
-            d_imm_u
-            d_imm_i_4_0
-            d_imm_i_sext
-            d_imm_b_sext
-            d_insn_name
+    solution:
+    in execute stage if you first enter divide set a flag "flag_divide_to_use_stall" = 1
+    once you get the quotient of the div operation in the writeback stage set "flag_divide_to_use_stall" = 0
 
-            d_insn_name = 42
-
-                                                DIV R1, R2, R3            
-
-    X       - DIV insn is executed:
-
-            include a case for InsnDiv
-              
-              rd  = insn_rd;                     -> set flag_multi_insn to 1            
-              rs1 = insn_rs1;                       update div_rs1_input to rs1_data       -> set rd_data to o_quotient
-              rs2 = insn_rs2;                       update div_rs2_input to rs2_data          set flag_multi_insn to 0
-                                                                                              
-
-              if (flag_multi_insn == 0) begin
-                  div_rs1_input = rs1_data;
-                  div_rs2_input = rs2_data;
-                end else begin
-                  rd_data = o_quotient;
-                end
-
-    M        - DIV insn memory stage:             ->  
-             passes thru                        
-             pc: execute_state.pc,
-             insn: execute_state.insn,
-             cycle_status: execute_state.cycle_status,
-
-             rd: x_rd,
-             rd_data: x_rd_data,
-             rs2_data: x_bp_rs2_data,
-
-             insn_name: execute_state.insn_name,
-             addr_to_dmem: x_addr_to_dmem,
-             we: x_we,
-             halt: x_halt
-
-    W        - DIV insn writeback stage
-             pc: memory_state.pc,
-             insn: memory_state.insn,
-             cycle_status: memory_state.cycle_status,
-
-             rd: memory_state.rd,
-             rd_data: m_rd_data,
-             we: memory_state.we,
-             halt: memory_state.halt
-
+    when you see that x-rs1 = m-rd AND flag_divide_to_use_stall=1 then stall the ADD by one cycle
+                      (in the cycle after that the code will already do a WX bypass for you for the ADD and the result of div from the writeback stage)
   */
 
 
