@@ -673,6 +673,8 @@ module DatapathPipelined (
             pc_to_imem = f_pc_current
             f_insn = insn_from_imem
             f_cycle_status
+
+                                                DIV R1, R2, R3            ADD R4, R1, R2
             
     D       - DIV insn is decoded:
             decode_state.pc
@@ -689,13 +691,48 @@ module DatapathPipelined (
 
             d_insn_name = 42
 
+                                                DIV R1, R2, R3            
+
     X       - DIV insn is executed:
 
             include a case for InsnDiv
-                                               -> 
+              
+              rd  = insn_rd;                     -> set flag_multi_insn to 1            
+              rs1 = insn_rs1;                       update div_rs1_input to rs1_data       -> set rd_data to o_quotient
+              rs2 = insn_rs2;                       update div_rs2_input to rs2_data          set flag_multi_insn to 0
+                                                                                              
 
-    M     
-    W
+              if (flag_multi_insn == 0) begin
+                  div_rs1_input = rs1_data;
+                  div_rs2_input = rs2_data;
+                end else begin
+                  rd_data = o_quotient;
+                end
+
+    M        - DIV insn memory stage:             ->  
+             passes thru                        
+             pc: execute_state.pc,
+             insn: execute_state.insn,
+             cycle_status: execute_state.cycle_status,
+
+             rd: x_rd,
+             rd_data: x_rd_data,
+             rs2_data: x_bp_rs2_data,
+
+             insn_name: execute_state.insn_name,
+             addr_to_dmem: x_addr_to_dmem,
+             we: x_we,
+             halt: x_halt
+
+    W        - DIV insn writeback stage
+             pc: memory_state.pc,
+             insn: memory_state.insn,
+             cycle_status: memory_state.cycle_status,
+
+             rd: memory_state.rd,
+             rd_data: m_rd_data,
+             we: memory_state.we,
+             halt: memory_state.halt
 
   */
 
