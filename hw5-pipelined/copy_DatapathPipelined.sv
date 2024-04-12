@@ -139,7 +139,6 @@ typedef struct packed {
 
   logic [4:0] rd;
   logic [`REG_SIZE] rd_data;
-  logic [`REG_SIZE] rs2_data;
 
   logic [`REG_SIZE] unaligned_addr_to_dmem;
   logic [`REG_SIZE] addr_to_dmem;
@@ -268,11 +267,7 @@ module DatapathPipelined (
     end else if (x_branching) begin
       decode_state <= '{pc: 0, insn: 0, cycle_status: CYCLE_TAKEN_BRANCH};
     end else if (x_load_stall) begin
-      decode_state <= '{
-          pc: decode_state.pc,
-          insn: decode_state.insn,
-          cycle_status: CYCLE_NO_STALL
-      };
+      decode_state <= '{pc: f_pc_current, insn: decode_state.insn, cycle_status: CYCLE_NO_STALL};
     end else begin
       begin
         decode_state <= '{pc: f_pc_current, insn: f_insn, cycle_status: f_cycle_status};
@@ -637,6 +632,75 @@ module DatapathPipelined (
       .sum(x_cla_inc_out)
   );
 
+
+
+  // divider_unsigned_pipelined unsigned_div (
+  //     .clk(clk),
+  //     .rst(rst),
+  //     .i_dividend(div_rs1_input),
+  //     .i_divisor(div_rs2_input),
+  //     .o_remainder(o_remainder),
+  //     .o_quotient(o_quotient)
+  // );
+
+  /*
+    Back in DatapathMultiCycle, we used the following:
+    
+    flag_multi_insn: flag that is set when we are in the middle of a multi insn
+    it is 0 if we are not in the middle of a division operation
+    it is 1 if we are in the second cycle of a dision operation
+
+    if you're in the middle of a multi_insn,
+    * don't increment PC
+    If you are not in a multi_insn then IF is_multi is 1
+      set flag_multi_insn to 1
+
+    is_multi: if the insn fetched is an insn which takes more than 1 cycle (div, divu, rem, remu)
+    it is 0 if the insn is not a multi-cycle insn
+    it is 1 if the insn is a multi-cycle insn
+    
+    if we enter into the division operation execute,
+    and we are in the first cycle of the division operation (flag_multi_insn == 0)
+    then we updated rs1 and rs2 wires
+    if we enter into the division operation execute,
+    but we are in the second cycle of the division operation (flag_multi_insn == 1)
+    then we updated rd_data without quotient
+
+    //
+
+    Now we have                                 Cycle 1 ----------------- Cycle 2 -----------------
+    F       - DIV insn is fetched: 
+            pc_to_imem = f_pc_current
+            f_insn = insn_from_imem
+            f_cycle_status
+            
+    D       - DIV insn is decoded:
+            decode_state.pc
+            decode_state.insn                   -> set is_multi to 1
+            decode_state.cycle_status
+            d_insn_rs1
+            d_insn_rs2
+            d_insn_rd
+            d_imm_u
+            d_imm_i_4_0
+            d_imm_i_sext
+            d_imm_b_sext
+            d_insn_name
+
+            d_insn_name = 42
+
+    X       - DIV insn is executed:
+
+            include a case for InsnDiv
+                                               -> 
+
+    M     
+    W
+
+  */
+
+
+
   // Loads
   logic x_is_load_insn;
   always_comb begin
@@ -911,59 +975,31 @@ module DatapathPipelined (
         x_rd = execute_state.rd;
         x_we = 1;
 
-        // Set unaligned address
-        x_addr_to_dmem = $signed(x_bp_rs1_data) + $signed(execute_state.imm_i_sext);
+        // Set address
+        x_unaligned_addr_to_dmem = $signed(x_bp_rs1_data) + $signed(execute_state.imm_i_sext);
+        x_addr_to_dmem = {x_unaligned_addr_to_dmem[31:2], 2'b0};
       end
 
-      InsnLh: begin
-        x_rd = execute_state.rd;
-        x_we = 1;
-
-        // Set unaligned address
-        x_addr_to_dmem = $signed(x_bp_rs1_data) + $signed(execute_state.imm_i_sext);
-      end
+      // InsnLh: begin
+      // end
 
       InsnLw: begin
         x_rd = execute_state.rd;
         x_we = 1;
 
-        // Set unaligned address
-        x_addr_to_dmem = $signed(x_bp_rs1_data) + $signed(execute_state.imm_i_sext);
+        // Set address
+        x_unaligned_addr_to_dmem = $signed(x_bp_rs1_data) + $signed(execute_state.imm_i_sext);
+        x_addr_to_dmem = x_unaligned_addr_to_dmem;
       end
 
-      InsnLbu: begin
-        x_rd = execute_state.rd;
-        x_we = 1;
+      // InsnLbu: begin
+      // end
 
-        // Set unaligned address
-        x_addr_to_dmem = $signed(x_bp_rs1_data) + $signed(execute_state.imm_i_sext);
-      end
-
-      InsnLhu: begin
-        x_rd = execute_state.rd;
-        x_we = 1;
-
-        // Set unaligned address
-        x_addr_to_dmem = $signed(x_bp_rs1_data) + $signed(execute_state.imm_i_sext);
-      end
-
-      /* SAVE INSNS */
-      InsnSb: begin
-        x_we = 0;
-        x_addr_to_dmem = $signed(x_bp_rs1_data) + $signed(execute_state.imm_i_sext);
-      end
-
-      InsnSh: begin
-        x_we = 0;
-        x_addr_to_dmem = $signed(x_bp_rs1_data) + $signed(execute_state.imm_i_sext);
-      end
-
-      InsnSw: begin
-        x_we = 0;
-        x_addr_to_dmem = $signed(x_bp_rs1_data) + $signed(execute_state.imm_i_sext);
-      end
+      // InsnLhu: begin
+      // end
 
       /* MISC INSNS */
+
       InsnFence: begin
         x_we = 0;
       end
@@ -993,10 +1029,10 @@ module DatapathPipelined (
 
           rd: 0,
           rd_data: 0,
-          rs2_data: 0,
 
           insn_name: 0,
 
+          unaligned_addr_to_dmem: 0,
           addr_to_dmem: 0,
 
           we: 0,
@@ -1011,10 +1047,10 @@ module DatapathPipelined (
 
             rd: x_rd,
             rd_data: x_rd_data,
-            rs2_data: x_bp_rs2_data,
 
             insn_name: execute_state.insn_name,
 
+            unaligned_addr_to_dmem: x_unaligned_addr_to_dmem,
             addr_to_dmem: x_addr_to_dmem,
 
             we: x_we,
@@ -1031,7 +1067,7 @@ module DatapathPipelined (
       .disasm(m_disasm)
   );
 
-
+  /* LOAD INSNS */
   logic [`REG_SIZE] m_rd_data;
   logic [`REG_SIZE] m_addr_to_dmem;
 
@@ -1039,10 +1075,8 @@ module DatapathPipelined (
     m_addr_to_dmem = 0;
 
     case (memory_state.insn_name)
-
-      /* LOAD INSNS */
       InsnLb: begin
-        m_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
+        m_addr_to_dmem = memory_state.addr_to_dmem;
 
         // Choose which byte of the loaded word to take
         // We also need to sign-extend our result manually
@@ -1064,124 +1098,10 @@ module DatapathPipelined (
         endcase
       end
 
-      InsnLbu: begin
-        m_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
-
-        // Choose which byte of the loaded word to take
-        // We also need to ZERO-extend our result manually
-        case (memory_state.addr_to_dmem[1:0])
-          2'b00: begin
-            m_rd_data = {24'b0, load_data_from_dmem[7:0]};
-          end
-          2'b01: begin
-            m_rd_data = {24'b0, load_data_from_dmem[15:8]};
-          end
-          2'b10: begin
-            m_rd_data = {24'b0, load_data_from_dmem[23:16]};
-          end
-          2'b11: begin
-            m_rd_data = {24'b0, load_data_from_dmem[31:24]};
-          end
-          default: begin
-          end
-        endcase
-      end
-
-      InsnLh: begin
-        // Only allow aligned addresses (last bit must be 0)
-        if (memory_state.x_addr_to_dmem[0] == 0) begin
-          m_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
-
-          case (memory_state.addr_to_dmem[1])
-            1'b0: begin
-              m_rd_data = {{16{load_data_from_dmem[15]}}, load_data_from_dmem[15:0]};
-            end
-            1'b1: begin
-              m_rd_data = {{16{load_data_from_dmem[31]}}, load_data_from_dmem[31:16]};
-            end
-            default: begin
-            end
-          endcase
-        end
-      end
-
-      InsnLhu: begin
-        // Only allow aligned addresses (last bit must be 0)
-        if (memory_state.x_addr_to_dmem[0] == 0) begin
-          m_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
-
-          case (memory_state.addr_to_dmem[1])
-            1'b0: begin
-              m_rd_data = {16'b0, load_data_from_dmem[15:0]};
-            end
-            1'b1: begin
-              m_rd_data = {16'b0, load_data_from_dmem[31:16]};
-            end
-            default: begin
-            end
-          endcase
-        end
-      end
-
       InsnLw: begin
-        // Only allow aligned addresses (last two bits must be 0)
-        if (memory_state.addr_to_dmem[1:0] == 2'b0) begin
+        if (memory_state.unaligned_addr_to_dmem[1:0] == 2'b0) begin
           m_rd_data = load_data_from_dmem;
           m_addr_to_dmem = memory_state.addr_to_dmem;
-        end
-      end
-
-      /* SAVE INSNS */
-      InsnSb: begin
-        m_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
-
-        case (memory_state.addr_to_dmem[1:0])
-          2'b00: begin
-            store_we_to_dmem   = 4'b0001;
-            store_data_to_dmem = {24'b0, memory_state.rs2_data[7:0]};
-          end
-          2'b01: begin
-            store_we_to_dmem   = 4'b0010;
-            store_data_to_dmem = {16'b0, memory_state.rs2_data[7:0], 8'b0};
-          end
-          2'b10: begin
-            store_we_to_dmem   = 4'b0100;
-            store_data_to_dmem = {8'b0, memory_state.rs2_data[7:0], 16'b0};
-          end
-          2'b11: begin
-            store_we_to_dmem   = 4'b1000;
-            store_data_to_dmem = {memory_state.rs2_data[7:0], 24'b0};
-          end
-          default: begin
-          end
-        endcase
-      end
-
-      InsnSh: begin
-        if (memory_state.addr_to_dmem[0] == 0) begin
-          m_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
-
-          // Choose which byte to store in this word
-          case (memory_state.addr_to_dmem[1])
-            1'b0: begin
-              store_we_to_dmem   = 4'b0011;
-              store_data_to_dmem = {16'b0, memory_state.rs2_data[15:0]};
-            end
-            1'b1: begin
-              store_we_to_dmem   = 4'b1100;
-              store_data_to_dmem = {memory_state.rs2_data[15:0], 16'b0};
-            end
-            default: begin
-            end
-          endcase
-        end
-      end
-
-      InsnSw: begin
-        if (memory_state.addr_to_dmem[1:0] == 2'b0) begin
-          addr_to_dmem = unaligned_addr_to_dmem;
-          store_we_to_dmem = 4'b1111;
-          store_data_to_dmem = memory_state.rs2_data;
         end
       end
 
