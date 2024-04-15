@@ -128,6 +128,7 @@ typedef struct packed {
   logic [`REG_SIZE] imm_i_sext;
   logic [`REG_SIZE] imm_b_sext;
   logic [`REG_SIZE] imm_s_sext;
+  logic [`REG_SIZE] imm_j_sext;
 
   logic [`INSN_NAME_SIZE] insn_name;
 } stage_execute_t;
@@ -577,6 +578,7 @@ module DatapathPipelined (
           imm_i_sext: 0,
           imm_b_sext: 0,
           imm_s_sext: 0,
+          imm_j_sext: 0,
 
           insn_name: 0
       };
@@ -595,6 +597,7 @@ module DatapathPipelined (
           imm_i_sext: 0,
           imm_b_sext: 0,
           imm_s_sext: 0,
+          imm_j_sext: 0,
 
           insn_name: 0
       };
@@ -613,6 +616,7 @@ module DatapathPipelined (
           imm_i_sext: 0,
           imm_b_sext: 0,
           imm_s_sext: 0,
+          imm_j_sext: 0,
 
           insn_name: 0
       };
@@ -631,6 +635,7 @@ module DatapathPipelined (
           imm_i_sext: 0,
           imm_b_sext: 0,
           imm_s_sext: 0,
+          imm_j_sext: 0,
 
           insn_name: 0
       };
@@ -650,6 +655,7 @@ module DatapathPipelined (
             imm_i_sext: d_imm_i_sext,
             imm_b_sext: d_imm_b_sext,
             imm_s_sext: d_imm_s_sext,
+            imm_j_sext: d_imm_j_sext,
 
             insn_name: d_insn_name
         };
@@ -734,7 +740,7 @@ module DatapathPipelined (
       .o_quotient(m_div_iter2_quotient)
   );
 
-  // Loads
+  // LOADS AND STALLING
   logic x_is_load_insn;
   always_comb begin
     if (execute_state.insn_name == InsnLb) begin
@@ -794,8 +800,16 @@ module DatapathPipelined (
     end
   end
 
+  // CALCULATING MEMORY ADDRESS
+
   logic [`REG_SIZE] x_unaligned_addr_to_dmem;
   logic [`REG_SIZE] x_addr_to_dmem;
+
+  // MUL STUFF
+  logic [63:0] x_mul_result;
+
+  // JUMP STUFF
+  logic [`REG_SIZE] x_jalr_int_value;
 
   // // //
   // EXECUTE: Logic
@@ -811,9 +825,13 @@ module DatapathPipelined (
     x_div_a = 0;
     x_div_b = 0;
 
+    x_mul_result = 0;
+
     int_one = 0;
     x_divide_by_zero = 0;
     x_div_flip_sign = 0;
+
+    x_jalr_int_value = 0;
 
     x_halt = 0;
 
@@ -832,6 +850,7 @@ module DatapathPipelined (
     case (execute_state.insn_name)
 
       // Arithmetic Insns
+      // Immediates
       InsnLui: begin
         x_rd = execute_state.rd;
         x_rd_data = {execute_state.imm_u, 12'b0};
@@ -909,6 +928,7 @@ module DatapathPipelined (
         x_we = 1;
       end
 
+      // RegReg
       InsnAdd: begin
         x_cla_a = x_bp_rs1_data;
         x_cla_b = x_bp_rs2_data;
@@ -971,6 +991,33 @@ module DatapathPipelined (
       InsnSra: begin
         x_rd = execute_state.rd;
         x_rd_data = $signed(x_bp_rs1_data) >>> x_rs2_data_4_0;
+        x_we = 1;
+      end
+
+      InsnMul: begin
+        x_rd = execute_state.rd;
+        x_rd_data = x_bp_rs1_data * x_bp_rs2_data;
+        x_we = 1;
+      end
+
+      InsnMulh: begin
+        x_rd = execute_state.rd;
+        x_mul_result = $signed(x_bp_rs1_data) * $signed(x_bp_rs2_data);
+        x_rd_data = x_mul_result[63:32];
+        x_we = 1;
+      end
+
+      InsnMulhsu: begin
+        x_rd = execute_state.rd;
+        x_mul_result = $signed(x_bp_rs1_data) * $signed({1'b0, x_bp_rs2_data});
+        x_rd_data = x_mul_result[63:32];
+        x_we = 1;
+      end
+
+      InsnMulhu: begin
+        x_rd = execute_state.rd;
+        x_mul_result = $unsigned(x_bp_rs1_data) * $unsigned(x_bp_rs2_data);
+        x_rd_data = x_mul_result[63:32];
         x_we = 1;
       end
 
@@ -1044,6 +1091,27 @@ module DatapathPipelined (
           x_branch_pc = execute_state.pc + execute_state.imm_b_sext;
           x_branching = 1;
         end
+      end
+
+      /* JUMP INSNS */
+
+      InsnJal: begin
+        x_rd = execute_state.rd;
+        x_rd_data = execute_state.pc + 32'd4;
+        x_we = 1;
+
+        x_branch_pc = execute_state.pc + execute_state.imm_j_sext;
+        x_branching = 1;
+      end
+
+      InsnJalr: begin
+        x_rd = execute_state.rd;
+        x_rd_data = execute_state.pc + 32'd4;
+        x_we = 1;
+
+        x_jalr_int_value = (x_bp_rs1_data + execute_state.imm_i_sext) & ~(32'd1);
+        x_branch_pc = {x_jalr_int_value[31:2], 2'b0};
+        x_branching = 1;
       end
 
       /* LOAD INSNS */
