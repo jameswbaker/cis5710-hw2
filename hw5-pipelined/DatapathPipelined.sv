@@ -127,6 +127,7 @@ typedef struct packed {
   logic [4:0] imm_i_4_0;
   logic [`REG_SIZE] imm_i_sext;
   logic [`REG_SIZE] imm_b_sext;
+  logic [`REG_SIZE] imm_s_sext;
 
   logic [`INSN_NAME_SIZE] insn_name;
 } stage_execute_t;
@@ -503,6 +504,19 @@ module DatapathPipelined (
     (d_insn_fence ? InsnFence : 6'd0
     ))))))))))))))))))))))))))))))))))))))))))))));
 
+  logic d_is_save_insn;
+  always_comb begin
+    if (d_insn_name == InsnSb) begin
+      assign d_is_save_insn = 1;
+    end else if (d_insn_name == InsnSh) begin
+      assign d_is_save_insn = 1;
+    end else if (d_insn_name == InsnSw) begin
+      assign d_is_save_insn = 1;
+    end else begin
+      assign d_is_save_insn = 0;
+    end
+  end
+
   /*****************/
   /* EXECUTE STAGE */
   /*****************/
@@ -523,6 +537,7 @@ module DatapathPipelined (
           imm_i_4_0: 0,
           imm_i_sext: 0,
           imm_b_sext: 0,
+          imm_s_sext: 0,
 
           insn_name: 0
       };
@@ -540,6 +555,7 @@ module DatapathPipelined (
           imm_i_4_0: 0,
           imm_i_sext: 0,
           imm_b_sext: 0,
+          imm_s_sext: 0,
 
           insn_name: 0
       };
@@ -557,6 +573,7 @@ module DatapathPipelined (
           imm_i_4_0: 0,
           imm_i_sext: 0,
           imm_b_sext: 0,
+          imm_s_sext: 0,
 
           insn_name: 0
       };
@@ -575,6 +592,7 @@ module DatapathPipelined (
             imm_i_4_0: d_imm_i_4_0,
             imm_i_sext: d_imm_i_sext,
             imm_b_sext: d_imm_b_sext,
+            imm_s_sext: d_imm_s_sext,
 
             insn_name: d_insn_name
         };
@@ -663,9 +681,11 @@ module DatapathPipelined (
 
   logic x_load_stall;
   always_comb begin
+    // We DON'T want to stall if the next insn is a save one
     if (x_is_load_insn && (execute_state.rd == d_insn_rs1)) begin
       assign x_load_stall = 1;
-    end else if (x_is_load_insn && (execute_state.rd == d_insn_rs2)) begin
+      // If the next insn is a save one and we're using rs2, we DON'T need to stall
+    end else if (x_is_load_insn && (execute_state.rd == d_insn_rs2) && (d_is_save_insn == 0)) begin
       assign x_load_stall = 1;
     end else begin
       assign x_load_stall = 0;
@@ -954,17 +974,17 @@ module DatapathPipelined (
       /* SAVE INSNS */
       InsnSb: begin
         x_we = 0;
-        x_addr_to_dmem = $signed(x_bp_rs1_data) + $signed(execute_state.imm_i_sext);
+        x_addr_to_dmem = $signed(x_bp_rs1_data) + $signed(execute_state.imm_s_sext);
       end
 
       InsnSh: begin
         x_we = 0;
-        x_addr_to_dmem = $signed(x_bp_rs1_data) + $signed(execute_state.imm_i_sext);
+        x_addr_to_dmem = $signed(x_bp_rs1_data) + $signed(execute_state.imm_s_sext);
       end
 
       InsnSw: begin
         x_we = 0;
-        x_addr_to_dmem = $signed(x_bp_rs1_data) + $signed(execute_state.imm_i_sext);
+        x_addr_to_dmem = $signed(x_bp_rs1_data) + $signed(execute_state.imm_s_sext);
       end
 
       /* MISC INSNS */
