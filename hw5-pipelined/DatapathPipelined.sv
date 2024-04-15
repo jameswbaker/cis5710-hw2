@@ -142,10 +142,12 @@ typedef struct packed {
 
   logic [`REG_SIZE] rd_data;
   logic [`REG_SIZE] rs2_data;
+  logic [`REG_SIZE] divide_flip_sign;
 
   logic [`REG_SIZE] addr_to_dmem;
 
   logic [5:0] insn_name;
+  logic [`REG_SIZE] divide_by_zero;
   logic is_load_insn;
 
   logic we;
@@ -238,7 +240,7 @@ module DatapathPipelined (
     end else if (x_branching) begin
       f_pc_current   <= x_branch_pc;
       f_cycle_status <= CYCLE_NO_STALL;
-    end else if (x_load_stall) begin
+    end else if (x_load_stall || x_divide_to_use_stall) begin
       f_pc_current   <= f_pc_current;
       f_cycle_status <= CYCLE_NO_STALL;
     end else begin
@@ -271,7 +273,7 @@ module DatapathPipelined (
       decode_state <= '{pc: 0, insn: 0, cycle_status: CYCLE_RESET};
     end else if (x_branching) begin
       decode_state <= '{pc: 0, insn: 0, cycle_status: CYCLE_TAKEN_BRANCH};
-    end else if (x_load_stall) begin
+    end else if (x_load_stall || x_divide_to_use_stall) begin
       decode_state <= '{
           pc: decode_state.pc,
           insn: decode_state.insn,
@@ -543,6 +545,23 @@ module DatapathPipelined (
 
           insn_name: 0
       };
+    end else if (x_divide_to_use_stall) begin
+      execute_state <= '{
+          pc: 0,
+          insn: 0,
+          cycle_status: CYCLE_DIV2USE,
+
+          rs1: 0,
+          rs2: 0,
+          rd: 0,
+
+          imm_u: 0,
+          imm_i_4_0: 0,
+          imm_i_sext: 0,
+          imm_b_sext: 0,
+
+          insn_name: 0
+      };
     end else if (x_branching) begin
       execute_state <= '{
           pc: 0,
@@ -607,6 +626,7 @@ module DatapathPipelined (
   // For branching
   logic [`REG_SIZE] x_branch_pc;
   logic x_branching;
+  logic [`REG_SIZE] int_one;
 
   // MX and WX bypassing
   // - First we check for a MX bypass, i.e. if x-rs1 = m-rd
@@ -644,15 +664,18 @@ module DatapathPipelined (
   // DIV stuff
 
   logic [`REG_SIZE] x_div_a, x_div_b;
-  logic [`REG_SIZE] w_div_remainder, w_div_quotient;
+  logic [`REG_SIZE] m_div_iter2_remainder, m_div_iter2_quotient;
+  logic [`REG_SIZE] m_div_iter2_quotient_flipped, m_div_iter2_remainder_flipped;
+  logic [`REG_SIZE] x_divide_by_zero, x_div_flip_sign;
 
   divider_unsigned_pipelined unsigned_div (
       .clk(clk),
       .rst(rst),
       .i_dividend(x_div_a),
       .i_divisor(x_div_b),
-      .o_remainder(w_div_remainder),
-      .o_quotient(w_div_remainder)
+      // remainder and quotient for the a and b in the execute stage will be ready in the memory stage
+      .o_remainder(m_div_iter2_remainder),
+      .o_quotient(m_div_iter2_quotient)
   );
 
   // Loads
@@ -686,6 +709,32 @@ module DatapathPipelined (
     end
   end
 
+  // DIVs
+
+  logic x_is_div_insn;
+  always_comb begin
+    if (execute_state.insn_name == InsnDiv) begin
+      assign x_is_div_insn = 1;
+    end else if (execute_state.insn_name == InsnDivu) begin
+      assign x_is_div_insn = 1;
+    end else if (execute_state.insn_name == InsnRem) begin
+      assign x_is_div_insn = 1;
+    end else if (execute_state.insn_name == InsnRemu) begin
+      assign x_is_div_insn = 1;
+    end else begin
+      assign x_is_div_insn = 0;
+    end
+  end
+
+  logic x_divide_to_use_stall;
+  always_comb begin
+    if (x_is_div_insn & (execute_state.rs1 == memory_state.rd || execute_state.rs2 == memory_state.rd)) begin
+      assign x_divide_to_use_stall = 1;
+    end else begin
+      assign x_divide_to_use_stall = 0;
+    end
+  end
+
   logic [`REG_SIZE] x_unaligned_addr_to_dmem;
   logic [`REG_SIZE] x_addr_to_dmem;
 
@@ -703,6 +752,10 @@ module DatapathPipelined (
     x_div_a = 0;
     x_div_b = 0;
 
+    int_one = 0;
+    x_divide_by_zero = 0;
+    x_div_flip_sign = 0;
+
     x_halt = 0;
 
     // Branching
@@ -713,6 +766,8 @@ module DatapathPipelined (
     x_unaligned_addr_to_dmem = 0;
     x_addr_to_dmem = 0;
 
+    m_div_iter2_quotient_flipped = ~m_div_iter2_quotient + 1;
+    m_div_iter2_remainder_flipped = ~m_div_iter2_remainder + 1;
 
     // Perform arithmetic based on instruction
     case (execute_state.insn_name)
@@ -994,7 +1049,91 @@ module DatapathPipelined (
       end
 
       InsnDiv: begin
-        
+        if (x_bp_rs2_data == 0) begin
+          // set flag to return -1
+          x_divide_by_zero = 1;
+          int_one = 1;
+          x_rd_data = $signed(~int_one + 1);
+        end else if (x_bp_rs1_data[31] == 1 && x_bp_rs2_data[31] == 0) begin
+          x_div_a = ~x_bp_rs1_data + 1;
+          x_div_b = x_bp_rs2_data;
+          x_div_flip_sign = 1;
+        end else if (x_bp_rs1_data[31] == 0 && x_bp_rs2_data[31] == 1) begin
+          x_div_a = x_bp_rs1_data;
+          x_div_b = ~x_bp_rs2_data + 1;
+          x_div_flip_sign = 1;
+        end else if (x_bp_rs1_data[31] == 1 && x_bp_rs2_data[31] == 1) begin
+          x_div_a = ~x_bp_rs1_data + 1;
+          x_div_b = ~x_bp_rs2_data + 1;
+          x_div_flip_sign = 0;
+        end else begin
+          x_div_a = x_bp_rs1_data;
+          x_div_b = x_bp_rs2_data;
+          x_divide_by_zero = 0;
+        end 
+
+        x_rd = execute_state.rd;
+        x_we = 1;
+      end
+
+      InsnDivu: begin  
+        if (x_bp_rs2_data == 0) begin
+          // set flag to return -1
+          x_divide_by_zero = 1;
+          int_one = 1;
+          x_rd_data = $unsigned(~int_one + 1);
+        end else begin
+          x_div_a = x_bp_rs1_data;
+          x_div_b = x_bp_rs2_data;
+          x_divide_by_zero = 0;
+        end
+
+        x_rd = execute_state.rd;
+        x_we = 1;
+      end
+
+      InsnRem: begin
+        if (x_bp_rs2_data == 0) begin
+          // set flag to return -1
+          x_divide_by_zero = 1;
+          int_one = 1;
+          x_rd_data = $signed(~int_one + 1);
+        end else if (x_bp_rs1_data[31] == 1 && x_bp_rs2_data[31] == 0) begin
+          x_div_a = ~x_bp_rs1_data + 1;
+          x_div_b = x_bp_rs2_data;
+          x_div_flip_sign = 1;
+        end else if (x_bp_rs1_data[31] == 0 && x_bp_rs2_data[31] == 1) begin
+          x_div_a = x_bp_rs1_data;
+          x_div_b = ~x_bp_rs2_data + 1;
+          x_div_flip_sign = 1;
+        end else if (x_bp_rs1_data[31] == 1 && x_bp_rs2_data[31] == 1) begin
+          x_div_a = ~x_bp_rs1_data + 1;
+          x_div_b = ~x_bp_rs2_data + 1;
+          x_div_flip_sign = 0;
+        end else begin
+          x_div_a = x_bp_rs1_data;
+          x_div_b = x_bp_rs2_data;
+          x_divide_by_zero = 0;
+        end 
+
+        x_rd = execute_state.rd;
+        x_we = 1;
+      end
+
+      InsnRemu: begin
+        if (x_bp_rs2_data == 0) begin
+          // set flag to return -1
+          x_divide_by_zero = 1;
+          int_one = 1;
+          x_rd_data = $unsigned(~int_one + 1);
+        end else begin
+          x_div_a = x_bp_rs1_data;
+          x_div_b = x_bp_rs2_data;
+          x_divide_by_zero = 0;
+        end
+
+        x_rd = execute_state.rd;
+        x_we = 1;
       end
 
       default: begin
@@ -1022,6 +1161,8 @@ module DatapathPipelined (
 
           insn_name: 0,
           is_load_insn: 0,
+          divide_by_zero: 0,
+          divide_flip_sign: 0,
 
           addr_to_dmem: 0,
 
@@ -1042,6 +1183,8 @@ module DatapathPipelined (
 
             insn_name: execute_state.insn_name,
             is_load_insn: x_is_load_insn,
+            divide_by_zero: x_divide_by_zero,
+            divide_flip_sign: x_div_flip_sign,
 
             addr_to_dmem: x_addr_to_dmem,
 
@@ -1088,6 +1231,12 @@ module DatapathPipelined (
     m_addr_to_dmem = 0;
 
     case (memory_state.insn_name)
+
+      /*
+        x_div_a=div1_rs1_data, x_div_b=div1_rs2_data, w_div_iter2=quotient=not ready
+        x_div_a=div2_rs1_data, x_div_b=div2_rs2_data, w_div_iter2=div1_x_quotient
+                                                      w_div_iter2=div2_x_quotient
+      */
 
       /* LOAD INSNS */
       InsnLb: begin
@@ -1231,6 +1380,42 @@ module DatapathPipelined (
           m_addr_to_dmem = memory_state.addr_to_dmem;
           store_we_to_dmem = 4'b1111;
           store_data_to_dmem = m_bp_rs2_data;
+        end
+      end
+
+      InsnDiv: begin
+        if (memory_state.divide_by_zero == 1) begin
+          m_rd_data = memory_state.rd_data;
+        end else if (memory_state.divide_flip_sign == 1) begin
+          m_rd_data = m_div_iter2_quotient_flipped;
+        end else begin
+          m_rd_data = m_div_iter2_quotient;
+        end
+      end
+
+      InsnDivu: begin
+        if (memory_state.divide_by_zero == 1) begin
+          m_rd_data = memory_state.rd_data;
+        end else begin
+          m_rd_data = m_div_iter2_quotient;
+        end
+      end
+
+      InsnRem: begin
+        if (memory_state.divide_by_zero == 1) begin
+          m_rd_data = memory_state.rd_data;
+        end else if (memory_state.divide_flip_sign == 1) begin
+          m_rd_data = m_div_iter2_remainder_flipped;
+        end else begin
+          m_rd_data = m_div_iter2_remainder;
+        end
+      end
+
+      InsnRemu: begin
+        if (memory_state.divide_by_zero == 1) begin
+          m_rd_data = memory_state.rd_data;
+        end else begin
+          m_rd_data = m_div_iter2_remainder;
         end
       end
 
