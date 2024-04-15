@@ -303,6 +303,43 @@ module DatapathPipelined (
   // split R-type instruction - see section 2.2 of RiscV spec
   assign {d_insn_funct7, d_insn_rs2, d_insn_rs1, d_insn_funct3, d_insn_rd, d_insn_opcode} = decode_state.insn;
 
+  // set rs1 and rs2 to zero if unused; this is for checking specific conditions later (where we ignore
+  // rs1 and rs2 if they are zero)
+  // - example reason we have to do this: in checking for load-use stalls, we look at if the decode rs2 and execute rd
+  //   are the same, but there may be cases where rs2 is accidentally set when it isn't actually used
+  logic [4:0] d_insn_rs1_fixed;
+  logic [4:0] d_insn_rs2_fixed;
+  always_comb begin
+    if (d_insn_opcode == OpLui) begin
+      assign d_insn_rs1_fixed = 0;
+      assign d_insn_rs2_fixed = 0;
+    end else if (d_insn_opcode == OpAuipc) begin
+      assign d_insn_rs1_fixed = 0;
+      assign d_insn_rs2_fixed = 0;
+    end else if (d_insn_opcode == OpJal) begin
+      assign d_insn_rs1_fixed = 0;
+      assign d_insn_rs2_fixed = 0;
+    end else if (d_insn_opcode == OpMiscMem) begin
+      assign d_insn_rs1_fixed = 0;
+      assign d_insn_rs2_fixed = 0;
+    end else if (d_insn_opcode == OpEnviron) begin
+      assign d_insn_rs1_fixed = 0;
+      assign d_insn_rs2_fixed = 0;
+    end else if (d_insn_opcode == OpJalr) begin
+      assign d_insn_rs1_fixed = d_insn_rs1;
+      assign d_insn_rs2_fixed = 0;
+    end else if (d_insn_opcode == OpLoad) begin
+      assign d_insn_rs1_fixed = d_insn_rs1;
+      assign d_insn_rs2_fixed = 0;
+    end else if (d_insn_opcode == OpRegImm) begin
+      assign d_insn_rs1_fixed = d_insn_rs1;
+      assign d_insn_rs2_fixed = 0;
+    end else begin
+      assign d_insn_rs1_fixed = d_insn_rs1;
+      assign d_insn_rs2_fixed = d_insn_rs2;
+    end
+  end
+
   // setup for I, S, B & J type instructions
   // I - short immediates and loads
   wire [11:0] d_imm_i;
@@ -677,15 +714,16 @@ module DatapathPipelined (
     end
   end
 
-  // logic x_load_stall = x_is_load_insn && (execute_state.rd == d_insn_rs1 || execute_state.rd == d_insn_rs2);
-
   logic x_load_stall;
   always_comb begin
     // We DON'T want to stall if the next insn is a save one
-    if (x_is_load_insn && (execute_state.rd == d_insn_rs1)) begin
+    // ALSO: make sure we check if rs1 or rs2 are zero, in which case we shouldn't stall (since x0=0 always)
+    // - we automatically set rs1_fixed and rs2_fixed to zero if they are unused for an insn (see above)
+    if (x_is_load_insn && (execute_state.rd == d_insn_rs1_fixed) && (d_insn_rs1_fixed != 0)) begin
       assign x_load_stall = 1;
       // If the next insn is a save one and we're using rs2, we DON'T need to stall
-    end else if (x_is_load_insn && (execute_state.rd == d_insn_rs2) && (d_is_save_insn == 0)) begin
+      // We also need to make sure that this doesn't apply to insns that don't use rs2
+    end else if (x_is_load_insn && (execute_state.rd == d_insn_rs2_fixed) && (d_is_save_insn == 0) && (d_insn_rs2_fixed != 0)) begin
       assign x_load_stall = 1;
     end else begin
       assign x_load_stall = 0;
@@ -725,6 +763,12 @@ module DatapathPipelined (
       InsnLui: begin
         x_rd = execute_state.rd;
         x_rd_data = {execute_state.imm_u, 12'b0};
+        x_we = 1;
+      end
+
+      InsnAuipc: begin
+        x_rd = execute_state.rd;
+        x_rd_data = execute_state.pc + {execute_state.imm_u, 12'b0};
         x_we = 1;
       end
 
