@@ -525,6 +525,54 @@ async def testDiv(dut):
     assert dut.datapath.rf.regs[2].value == 1, f'failed at cycle {dut.datapath.cycles_current.value.integer}'
 
 @cocotb.test(skip='RVTEST_ALUBR' in os.environ)
+async def testDivBy0(dut):
+    "Run div insn"
+    asm(dut, '''
+        lui x1,0x12345
+        div x2,x1,x0''')
+    await preTestSetup(dut)
+
+    await ClockCycles(dut.clk, 7)
+    assert dut.datapath.rf.regs[2].value == -1, f'failed at cycle {dut.datapath.cycles_current.value.integer}'
+
+@cocotb.test(skip='RVTEST_ALUBR' in os.environ)
+async def testNegativeDiv(dut):
+    "Run div insn"
+    asm(dut, '''
+        addi x3,x0,-1
+        addi x1,x0,1
+        div x2,x3,x1''')
+    await preTestSetup(dut)
+
+    await ClockCycles(dut.clk, 8)
+    assert dut.datapath.rf.regs[2].value == -1, f'failed at cycle {dut.datapath.cycles_current.value.integer}'
+
+@cocotb.test(skip='RVTEST_ALUBR' in os.environ)
+async def testNegativeDiv2(dut):
+    "Run div insn"
+    asm(dut, '''
+        addi x3,x0,1
+        addi x1,x0,-1
+        div x2,x3,x1''')
+    await preTestSetup(dut)
+
+    await ClockCycles(dut.clk, 8)
+    assert dut.datapath.rf.regs[2].value == -1, f'failed at cycle {dut.datapath.cycles_current.value.integer}'
+
+@cocotb.test(skip='RVTEST_ALUBR' in os.environ)
+async def testNegativeDiv3(dut):
+    "Run div insn"
+    asm(dut, '''
+        addi x3,x0,-1
+        addi x1,x0,-1
+        div x2,x3,x1''')
+    await preTestSetup(dut)
+
+    await ClockCycles(dut.clk, 8)
+    assert dut.datapath.rf.regs[2].value == 1, f'failed at cycle {dut.datapath.cycles_current.value.integer}'
+
+
+@cocotb.test(skip='RVTEST_ALUBR' in os.environ)
 async def testDivUse(dut):
     "Run div + dependent insn"
     asm(dut, '''
