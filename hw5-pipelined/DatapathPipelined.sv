@@ -808,13 +808,13 @@ module DatapathPipelined (
     // ALSO: make sure we check if rs1 or rs2 are zero, in which case we shouldn't stall (since x0=0 always)
     // - we automatically set rs1_fixed and rs2_fixed to zero if they are unused for an insn (see above)
     if (x_is_load_insn && (execute_state.rd == d_insn_rs1_fixed) && (d_insn_rs1_fixed != 0)) begin
-      assign x_load_stall = 1;
+      x_load_stall = 1;
       // If the next insn is a save one and we're using rs2, we DON'T need to stall
       // We also need to make sure that this doesn't apply to insns that don't use rs2
     end else if (x_is_load_insn && (execute_state.rd == d_insn_rs2_fixed) && (d_is_save_insn == 0) && (d_insn_rs2_fixed != 0)) begin
-      assign x_load_stall = 1;
+      x_load_stall = 1;
     end else begin
-      assign x_load_stall = 0;
+      x_load_stall = 0;
     end
   end
 
