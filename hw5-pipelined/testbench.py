@@ -594,7 +594,7 @@ async def testTraceRvLw(dut):
 @cocotb.test(skip='RVTEST_ALUBR' in os.environ)
 async def testOneRiscvTest(dut):
     "one riscv test"
-    await riscvTest(dut, RISCV_TESTS_PATH / 'rv32ui-p-lw')
+    await riscvTest(dut, RISCV_TESTS_PATH / 'rv32um-p-rem')
 
 def handleTrace(dut, trace, traceIdx, tracingMode):
     if tracingMode == 'generate':

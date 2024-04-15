@@ -242,7 +242,7 @@ module DatapathPipelined (
     end else if (x_branching) begin
       f_pc_current   <= x_branch_pc;
       f_cycle_status <= CYCLE_NO_STALL;
-    end else if (x_load_stall || x_divide_to_use_stall) begin
+    end else if (x_load_stall || x_divide_to_use_stall || d_fence_stall) begin
       f_pc_current   <= f_pc_current;
       f_cycle_status <= CYCLE_NO_STALL;
     end else begin
@@ -275,7 +275,7 @@ module DatapathPipelined (
       decode_state <= '{pc: 0, insn: 0, cycle_status: CYCLE_RESET};
     end else if (x_branching) begin
       decode_state <= '{pc: 0, insn: 0, cycle_status: CYCLE_TAKEN_BRANCH};
-    end else if (x_load_stall || x_divide_to_use_stall) begin
+    end else if (x_load_stall || x_divide_to_use_stall || d_fence_stall) begin
       decode_state <= '{
           pc: decode_state.pc,
           insn: decode_state.insn,
@@ -557,6 +557,19 @@ module DatapathPipelined (
     end
   end
 
+  // STALLING BC OF FENCE
+  // Logic:
+  // - Check if decode stage currently has a fence insn
+  // - Check if there is any save insn in execute or memory
+  logic d_fence_stall;
+  always_comb begin
+    if ((d_insn_name == InsnFence) && (x_is_save_insn || m_is_save_insn)) begin
+      assign d_fence_stall = 1;
+    end else begin
+      assign d_fence_stall = 0;
+    end
+  end
+
   /*****************/
   /* EXECUTE STAGE */
   /*****************/
@@ -755,6 +768,19 @@ module DatapathPipelined (
       assign x_is_load_insn = 1;
     end else begin
       assign x_is_load_insn = 0;
+    end
+  end
+
+  logic x_is_save_insn;
+  always_comb begin
+    if (execute_state.insn_name == InsnSb) begin
+      assign x_is_save_insn = 1;
+    end else if (execute_state.insn_name == InsnSh) begin
+      assign x_is_save_insn = 1;
+    end else if (execute_state.insn_name == InsnSw) begin
+      assign x_is_save_insn = 1;
+    end else begin
+      assign x_is_save_insn = 0;
     end
   end
 
@@ -1229,8 +1255,7 @@ module DatapathPipelined (
         if (x_bp_rs2_data == 0) begin
           // set flag to return -1
           x_divide_by_zero = 1;
-          int_one = 1;
-          x_rd_data = $signed(~int_one + 1);
+          x_rd_data = x_bp_rs1_data;
         end else if (x_bp_rs1_data[31] == 1 && x_bp_rs2_data[31] == 0) begin
           x_div_a = ~x_bp_rs1_data + 1;
           x_div_b = x_bp_rs2_data;
@@ -1238,11 +1263,11 @@ module DatapathPipelined (
         end else if (x_bp_rs1_data[31] == 0 && x_bp_rs2_data[31] == 1) begin
           x_div_a = x_bp_rs1_data;
           x_div_b = ~x_bp_rs2_data + 1;
-          x_div_flip_sign = 1;
+          x_div_flip_sign = 0;
         end else if (x_bp_rs1_data[31] == 1 && x_bp_rs2_data[31] == 1) begin
           x_div_a = ~x_bp_rs1_data + 1;
           x_div_b = ~x_bp_rs2_data + 1;
-          x_div_flip_sign = 0;
+          x_div_flip_sign = 1;
         end else begin
           x_div_a = x_bp_rs1_data;
           x_div_b = x_bp_rs2_data;
@@ -1257,8 +1282,7 @@ module DatapathPipelined (
         if (x_bp_rs2_data == 0) begin
           // set flag to return -1
           x_divide_by_zero = 1;
-          int_one = 1;
-          x_rd_data = $unsigned(~int_one + 1);
+          x_rd_data = x_bp_rs1_data;
         end else begin
           x_div_a = x_bp_rs1_data;
           x_div_b = x_bp_rs2_data;
