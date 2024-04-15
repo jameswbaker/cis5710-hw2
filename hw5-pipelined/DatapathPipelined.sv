@@ -615,6 +615,24 @@ module DatapathPipelined (
           insn_name: 0
       };
     end else if (x_divide_to_use_stall) begin
+      // execute_state <= '{
+      //     pc: execute_state.pc,
+      //     insn: execute_state.insn,
+      //     cycle_status: CYCLE_DIV2USE,
+
+      //     rs1: execute_state.rs1,
+      //     rs2: execute_state.rs2,
+      //     rd: execute_state.rd,
+
+      //     imm_u: execute_state.imm_u,
+      //     imm_i_4_0: execute_state.imm_i_4_0,
+      //     imm_i_sext: execute_state.imm_i_sext,
+      //     imm_b_sext: execute_state.imm_b_sext,
+      //     imm_s_sext: execute_state.imm_s_sext,
+      //     imm_j_sext: execute_state.imm_j_sext,
+
+      //     insn_name: execute_state.insn_name
+      // };
       execute_state <= '{
           pc: 0,
           insn: 0,
@@ -801,7 +819,6 @@ module DatapathPipelined (
   end
 
   // DIVs
-
   logic x_is_div_insn;
   always_comb begin
     if (execute_state.insn_name == InsnDiv) begin
@@ -819,7 +836,9 @@ module DatapathPipelined (
 
   logic x_divide_to_use_stall;
   always_comb begin
-    if (x_is_div_insn & (execute_state.rs1 == memory_state.rd || execute_state.rs2 == memory_state.rd)) begin
+    if (x_is_div_insn && (execute_state.rd == d_insn_rs1_fixed) && (d_insn_rs1_fixed != 0)) begin
+      assign x_divide_to_use_stall = 1;
+    end else if (x_is_div_insn && (execute_state.rd == d_insn_rs2_fixed) && (d_insn_rs2_fixed != 0)) begin
       assign x_divide_to_use_stall = 1;
     end else begin
       assign x_divide_to_use_stall = 0;
