@@ -314,32 +314,32 @@ module DatapathPipelined (
   logic [4:0] d_insn_rs2_fixed;
   always_comb begin
     if (d_insn_opcode == OpLui) begin
-      assign d_insn_rs1_fixed = 0;
-      assign d_insn_rs2_fixed = 0;
+      d_insn_rs1_fixed = 0;
+      d_insn_rs2_fixed = 0;
     end else if (d_insn_opcode == OpAuipc) begin
-      assign d_insn_rs1_fixed = 0;
-      assign d_insn_rs2_fixed = 0;
+      d_insn_rs1_fixed = 0;
+      d_insn_rs2_fixed = 0;
     end else if (d_insn_opcode == OpJal) begin
-      assign d_insn_rs1_fixed = 0;
-      assign d_insn_rs2_fixed = 0;
+      d_insn_rs1_fixed = 0;
+      d_insn_rs2_fixed = 0;
     end else if (d_insn_opcode == OpMiscMem) begin
-      assign d_insn_rs1_fixed = 0;
-      assign d_insn_rs2_fixed = 0;
+      d_insn_rs1_fixed = 0;
+      d_insn_rs2_fixed = 0;
     end else if (d_insn_opcode == OpEnviron) begin
-      assign d_insn_rs1_fixed = 0;
-      assign d_insn_rs2_fixed = 0;
+      d_insn_rs1_fixed = 0;
+      d_insn_rs2_fixed = 0;
     end else if (d_insn_opcode == OpJalr) begin
-      assign d_insn_rs1_fixed = d_insn_rs1;
-      assign d_insn_rs2_fixed = 0;
+      d_insn_rs1_fixed = d_insn_rs1;
+      d_insn_rs2_fixed = 0;
     end else if (d_insn_opcode == OpLoad) begin
-      assign d_insn_rs1_fixed = d_insn_rs1;
-      assign d_insn_rs2_fixed = 0;
+      d_insn_rs1_fixed = d_insn_rs1;
+      d_insn_rs2_fixed = 0;
     end else if (d_insn_opcode == OpRegImm) begin
-      assign d_insn_rs1_fixed = d_insn_rs1;
-      assign d_insn_rs2_fixed = 0;
+      d_insn_rs1_fixed = d_insn_rs1;
+      d_insn_rs2_fixed = 0;
     end else begin
-      assign d_insn_rs1_fixed = d_insn_rs1;
-      assign d_insn_rs2_fixed = d_insn_rs2;
+      d_insn_rs1_fixed = d_insn_rs1;
+      d_insn_rs2_fixed = d_insn_rs2;
     end
   end
 
@@ -547,13 +547,13 @@ module DatapathPipelined (
   logic d_is_save_insn;
   always_comb begin
     if (d_insn_name == InsnSb) begin
-      assign d_is_save_insn = 1;
+      d_is_save_insn = 1;
     end else if (d_insn_name == InsnSh) begin
-      assign d_is_save_insn = 1;
+      d_is_save_insn = 1;
     end else if (d_insn_name == InsnSw) begin
-      assign d_is_save_insn = 1;
+      d_is_save_insn = 1;
     end else begin
-      assign d_is_save_insn = 0;
+      d_is_save_insn = 0;
     end
   end
 
@@ -564,9 +564,9 @@ module DatapathPipelined (
   logic d_fence_stall;
   always_comb begin
     if ((d_insn_name == InsnFence) && (x_is_save_insn || m_is_save_insn)) begin
-      assign d_fence_stall = 1;
+      d_fence_stall = 1;
     end else begin
-      assign d_fence_stall = 0;
+      d_fence_stall = 0;
     end
   end
 
@@ -775,30 +775,30 @@ module DatapathPipelined (
   logic x_is_load_insn;
   always_comb begin
     if (execute_state.insn_name == InsnLb) begin
-      assign x_is_load_insn = 1;
+      x_is_load_insn = 1;
     end else if (execute_state.insn_name == InsnLbu) begin
-      assign x_is_load_insn = 1;
+      x_is_load_insn = 1;
     end else if (execute_state.insn_name == InsnLh) begin
-      assign x_is_load_insn = 1;
+      x_is_load_insn = 1;
     end else if (execute_state.insn_name == InsnLhu) begin
-      assign x_is_load_insn = 1;
+      x_is_load_insn = 1;
     end else if (execute_state.insn_name == InsnLw) begin
-      assign x_is_load_insn = 1;
+      x_is_load_insn = 1;
     end else begin
-      assign x_is_load_insn = 0;
+      x_is_load_insn = 0;
     end
   end
 
   logic x_is_save_insn;
   always_comb begin
     if (execute_state.insn_name == InsnSb) begin
-      assign x_is_save_insn = 1;
+      x_is_save_insn = 1;
     end else if (execute_state.insn_name == InsnSh) begin
-      assign x_is_save_insn = 1;
+      x_is_save_insn = 1;
     end else if (execute_state.insn_name == InsnSw) begin
-      assign x_is_save_insn = 1;
+      x_is_save_insn = 1;
     end else begin
-      assign x_is_save_insn = 0;
+      x_is_save_insn = 0;
     end
   end
 
@@ -822,26 +822,26 @@ module DatapathPipelined (
   logic x_is_div_insn;
   always_comb begin
     if (execute_state.insn_name == InsnDiv) begin
-      assign x_is_div_insn = 1;
+      x_is_div_insn = 1;
     end else if (execute_state.insn_name == InsnDivu) begin
-      assign x_is_div_insn = 1;
+      x_is_div_insn = 1;
     end else if (execute_state.insn_name == InsnRem) begin
-      assign x_is_div_insn = 1;
+      x_is_div_insn = 1;
     end else if (execute_state.insn_name == InsnRemu) begin
-      assign x_is_div_insn = 1;
+      x_is_div_insn = 1;
     end else begin
-      assign x_is_div_insn = 0;
+      x_is_div_insn = 0;
     end
   end
 
   logic x_divide_to_use_stall;
   always_comb begin
     if (x_is_div_insn && (execute_state.rd == d_insn_rs1_fixed) && (d_insn_rs1_fixed != 0)) begin
-      assign x_divide_to_use_stall = 1;
+      x_divide_to_use_stall = 1;
     end else if (x_is_div_insn && (execute_state.rd == d_insn_rs2_fixed) && (d_insn_rs2_fixed != 0)) begin
-      assign x_divide_to_use_stall = 1;
+      x_divide_to_use_stall = 1;
     end else begin
-      assign x_divide_to_use_stall = 0;
+      x_divide_to_use_stall = 0;
     end
   end
 
@@ -1386,13 +1386,13 @@ module DatapathPipelined (
   logic m_is_save_insn;
   always_comb begin
     if (memory_state.insn_name == InsnSb) begin
-      assign m_is_save_insn = 1;
+      m_is_save_insn = 1;
     end else if (memory_state.insn_name == InsnSh) begin
-      assign m_is_save_insn = 1;
+      m_is_save_insn = 1;
     end else if (memory_state.insn_name == InsnSw) begin
-      assign m_is_save_insn = 1;
+      m_is_save_insn = 1;
     end else begin
-      assign m_is_save_insn = 0;
+      m_is_save_insn = 0;
     end
   end
 
