@@ -1361,7 +1361,8 @@ module DatapathPipelined (
   assign m_bp_rs2_data = ((memory_state.rs2 == writeback_state.rd) && writeback_state.is_load_insn && m_is_save_insn) ? writeback_state.rd_data : memory_state.rs2_data;
 
   always_comb begin
-    m_addr_to_dmem = 0;
+    m_addr_to_dmem   = 0;
+    store_we_to_dmem = 0;
 
     case (memory_state.insn_name)
 
