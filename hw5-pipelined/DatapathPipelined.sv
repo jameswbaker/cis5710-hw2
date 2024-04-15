@@ -641,6 +641,20 @@ module DatapathPipelined (
       .sum(x_cla_inc_out)
   );
 
+  // DIV stuff
+
+  logic [`REG_SIZE] x_div_a, x_div_b;
+  logic [`REG_SIZE] w_div_remainder, w_div_quotient;
+
+  divider_unsigned_pipelined unsigned_div (
+      .clk(clk),
+      .rst(rst),
+      .i_dividend(x_div_a),
+      .i_divisor(x_div_b),
+      .o_remainder(w_div_remainder),
+      .o_quotient(w_div_remainder)
+  );
+
   // Loads
   logic x_is_load_insn;
   always_comb begin
@@ -686,6 +700,8 @@ module DatapathPipelined (
     x_cla_inc_in = 0;
     x_cla_a = 0;
     x_cla_b = 0;
+    x_div_a = 0;
+    x_div_b = 0;
 
     x_halt = 0;
 
@@ -975,6 +991,10 @@ module DatapathPipelined (
       InsnEcall: begin
         x_we   = 0;
         x_halt = 1;
+      end
+
+      InsnDiv: begin
+        
       end
 
       default: begin
