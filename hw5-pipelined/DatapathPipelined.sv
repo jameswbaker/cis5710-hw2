@@ -612,6 +612,7 @@ module DatapathPipelined (
           imm_i_4_0: 0,
           imm_i_sext: 0,
           imm_b_sext: 0,
+          imm_s_sext: 0,
 
           insn_name: 0
       };
@@ -1134,13 +1135,13 @@ module DatapathPipelined (
           x_div_a = x_bp_rs1_data;
           x_div_b = x_bp_rs2_data;
           x_divide_by_zero = 0;
-        end 
+        end
 
         x_rd = execute_state.rd;
         x_we = 1;
       end
 
-      InsnDivu: begin  
+      InsnDivu: begin
         if (x_bp_rs2_data == 0) begin
           // set flag to return -1
           x_divide_by_zero = 1;
@@ -1178,7 +1179,7 @@ module DatapathPipelined (
           x_div_a = x_bp_rs1_data;
           x_div_b = x_bp_rs2_data;
           x_divide_by_zero = 0;
-        end 
+        end
 
         x_rd = execute_state.rd;
         x_we = 1;
