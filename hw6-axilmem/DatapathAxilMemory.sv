@@ -102,7 +102,7 @@ endinterface
 
 module MemoryAxiLite #(
     parameter int NUM_WORDS  = 32,
-    parameter int ADDR_WIDTH = 32,
+    // parameter int ADDR_WIDTH = 32,
     parameter int DATA_WIDTH = 32
 ) (
     axi_clkrst_if axi,
@@ -134,6 +134,7 @@ module MemoryAxiLite #(
 `endif
 
   // TODO: changes will be needed throughout this module
+  logic i_ar_handshake = insn.ARREADY == 1 & insn.ARVALID == 1;
 
   always_ff @(posedge axi.ACLK) begin
     if (!axi.ARESETn) begin
@@ -142,9 +143,24 @@ module MemoryAxiLite #(
       data.ARREADY <= 1;
       // start out ready to accept an incoming write
       data.AWREADY <= 1;
-      data.WREADY <= 1;
-    end else begin
+      data.WREADY  <= 1;
 
+      // check if a read address is ready to be sent
+      if (i_ar_handshake) begin
+        insn.RVALID <= 1;
+        insn.RRESP  <= ResponseOkay;
+        insn.RDATA  <= mem_array[insn.ARADDR[AddrMsb:AddrLsb]];
+      end else begin
+        insn.RVALID <= 0;
+      end
+
+    end else begin
+      // Resetting
+      insn.BVALID <= 0;
+      data.BVALID <= 0;
+
+      insn.RVALID <= 0;
+      data.RVALID <= 0;
     end
   end
 
@@ -414,13 +430,18 @@ module RiscvProcessor (
   );
 
   // HW6 memory interface
-  axi_clkrst_if axi_cr (.ACLK(clk), .ARESETn(~rst));
+  axi_clkrst_if axi_cr (
+      .ACLK(clk),
+      .ARESETn(~rst)
+  );
   axi_if axi_data ();
   axi_if axi_insn ();
-  MemoryAxiLite #(.NUM_WORDS(8192)) mem (
-    .axi(axi_cr),
-    .insn(axi_insn.subord),
-    .data(axi_data.subord)
+  MemoryAxiLite #(
+      .NUM_WORDS(8192)
+  ) mem (
+      .axi (axi_cr),
+      .insn(axi_insn.subord),
+      .data(axi_data.subord)
   );
 
   DatapathAxilMemory datapath (
