@@ -134,7 +134,6 @@ module MemoryAxiLite #(
 `endif
 
   // TODO: changes will be needed throughout this module
-  logic i_ar_handshake = insn.ARREADY == 1 & insn.ARVALID == 1;
 
   always_ff @(posedge axi.ACLK) begin
     if (!axi.ARESETn) begin
@@ -145,22 +144,64 @@ module MemoryAxiLite #(
       data.AWREADY <= 1;
       data.WREADY  <= 1;
 
+      
+
+    end else begin
+      // Resetting
+
       // check if a read address is ready to be sent
-      if (i_ar_handshake) begin
+      if (insn.ARREADY == 1 && insn.ARVALID == 1) begin
         insn.RVALID <= 1;
         insn.RRESP  <= ResponseOkay;
-        insn.RDATA  <= mem_array[insn.ARADDR[AddrMsb:AddrLsb]];
+        insn.RDATA  <= mem_array[insn.ARADDR[AddrMsb:AddrLsb]];        
       end else begin
         insn.RVALID <= 0;
       end
 
-    end else begin
-      // Resetting
-      insn.BVALID <= 0;
-      data.BVALID <= 0;
+      // after writing this, I'm not sure if we will need this because we can't write to imem
+      // so we may only need to implement writes once we also have reads from dmem working
 
-      insn.RVALID <= 0;
-      data.RVALID <= 0;
+      // TODO: WREADY and BREADY
+      // if (insn.AWVALID == 1 && insn.AWREADY == 1) begin
+      //   insn.BVALID <= 1;
+      //   insn.BRESP  <= ResponseOkay;
+      //   mem_array[insn.AWADDR[AddrMsb:AddrLsb]] <= insn.WDATA;
+      // end else begin
+      //   insn.BVALID <= 0;
+      // end
+      
+      
+
+      
+
+      /*
+        
+        1. Manager
+          * address on Write Address channel
+          * data on Write Data channel
+          * AWVALID is asserted -> address on Write Address is valid
+          * WVALID is asserted -> data on Write Data is valid
+          * BREADY is asserted -> Manager ready to receive response
+        
+        2. Subordinate 
+          "Subordinate asserts AWREADY and WREADY on the Write Address and Write Data channels, respectively."
+              Q: does this mean one per or both per
+          * asserts AWREADY on the Write Address
+          * asserts WREADY on the Write Data 
+
+        Write Address: AWVALID and AWREADY are asserted
+        Write Data: WVALID and WREADY are asserted
+        ---> handshakes on those channels occur
+        ---> associated Valid and Ready signals can be deasserted
+
+        Subordinate has the write address and data
+        Subordinate asserts BVALID   --->   valid reponse on the Write response channel
+                    (in this case the response is 2’b00, that being ‘OKAY’).
+        
+        The next rising clock edge completes the transaction
+        both the Ready and Valid signals on the write response channel high.
+      */
+      
     end
   end
 
