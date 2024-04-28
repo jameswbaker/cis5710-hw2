@@ -110,7 +110,7 @@ endmodule
 /** state at the start of Decode stage */
 typedef struct packed {
   logic [`REG_SIZE] pc;
-  logic [`INSN_SIZE] insn;
+  // logic [`INSN_SIZE] insn;
   cycle_status_e cycle_status;
 } stage_decode_t;
 
@@ -261,12 +261,10 @@ module MemoryAxiLite #(
       data.AWREADY <= 1;
       data.WREADY  <= 1;
 
-      // insn.RDATA <= 0;
-      // data.RDATA <= 0;
+      insn.RDATA   <= 0;
+      data.RDATA   <= 0;
 
     end else begin
-      // Resetting
-
       // Reading instructions
       if (insn.ARREADY == 1 && insn.ARVALID == 1) begin
         insn.RVALID <= 1;
@@ -288,8 +286,23 @@ module MemoryAxiLite #(
       // data write address
       if (data.AWVALID && data.AWREADY && data.WVALID && data.WREADY && data.BREADY) begin
         data.BVALID <= 1;
-        data.BRESP <= ResponseOkay;
-        mem_array[data.AWADDR[AddrMsb:AddrLsb]] <= data.WDATA;
+        data.BRESP  <= ResponseOkay;
+
+        // using strobe, we should only write to the bytes that have been specified
+        if (data.WSTRB[0]) begin
+          mem_array[data.AWADDR[AddrMsb:AddrLsb]][7:0] <= data.WDATA[7:0];
+        end
+        if (data.WSTRB[1]) begin
+          mem_array[data.AWADDR[AddrMsb:AddrLsb]][15:8] <= data.WDATA[15:8];
+        end
+        if (data.WSTRB[2]) begin
+          mem_array[data.AWADDR[AddrMsb:AddrLsb]][23:16] <= data.WDATA[23:16];
+        end
+        if (data.WSTRB[3]) begin
+          mem_array[data.AWADDR[AddrMsb:AddrLsb]][31:24] <= data.WDATA[31:24];
+        end
+
+        // mem_array[data.AWADDR[AddrMsb:AddrLsb]] <= data.WDATA;
       end else begin
         insn.BVALID <= 0;
       end
@@ -412,21 +425,21 @@ module DatapathAxilMemory (
     */
 
     // Start by replacing this interface to imem...
-    output logic [ `REG_SIZE] pc_to_imem,
-    input  wire  [`INSN_SIZE] insn_from_imem,
+    // output logic [ `REG_SIZE] pc_to_imem,
+    // input  wire  [`INSN_SIZE] insn_from_imem,
     // ...with this AXIL one.
-    // axi_if.manager imem,
+    axi_if.manager imem,
 
     // pc_to_imem (output) -> imem.ARADDR
     // insn_from_imem (input) -> imem.RDATA
 
     // Once imem is working, replace this interface to dmem...
-    output logic [`REG_SIZE] addr_to_dmem,
-    input wire [`REG_SIZE] load_data_from_dmem,
-    output logic [`REG_SIZE] store_data_to_dmem,
-    output logic [3:0] store_we_to_dmem,
+    // output logic [`REG_SIZE] addr_to_dmem,
+    // input wire [`REG_SIZE] load_data_from_dmem,
+    // output logic [`REG_SIZE] store_data_to_dmem,
+    // output logic [3:0] store_we_to_dmem,
     // ...with this AXIL one
-    // axi_if.manager dmem,
+    axi_if.manager dmem,
 
     // addr_to_dmem (output) -> 
 
@@ -477,7 +490,7 @@ module DatapathAxilMemory (
   /***************/
 
   logic [`REG_SIZE] f_pc_current;
-  wire [`REG_SIZE] f_insn;
+  logic [`REG_SIZE] f_insn;
   cycle_status_e f_cycle_status;
 
   // program counter
@@ -497,40 +510,62 @@ module DatapathAxilMemory (
       f_cycle_status <= CYCLE_NO_STALL;
     end
   end
-  // send PC to imem
-  assign pc_to_imem = f_pc_current;
-  assign f_insn = insn_from_imem;
+
+  always_comb begin
+    imem.ARVALID = 1;
+    imem.RREADY  = 1;
+    imem.ARADDR  = f_pc_current;
+  end
 
   // Here's how to disassemble an insn into a string you can view in GtkWave.
   // Use PREFIX to provide a 1-character tag to identify which stage the insn comes from.
-  wire [255:0] f_disasm;
-  Disasm #(
-      .PREFIX("F")
-  ) disasm_0fetch (
-      .insn  (f_insn),
-      .disasm(f_disasm)
-  );
+  // wire [255:0] f_disasm;
+  // Disasm #(
+  //     .PREFIX("F")
+  // ) disasm_0fetch (
+  //     .insn  (f_insn),
+  //     .disasm(f_disasm)
+  // );
 
   /****************/
   /* DECODE STAGE */
   /****************/
 
+  logic [`REG_SIZE] d_insn_curr;
+  logic [`REG_SIZE] d_insn_prev;  // for saving the prev insn state
+  logic [`REG_SIZE] d_insn;  // the actual insn we will end up using (after stalling)
+
+  always_comb begin
+    if (decode_state.cycle_status == CYCLE_TAKEN_BRANCH) begin
+      d_insn_curr = 0;
+    end else begin
+      d_insn_curr = imem.RDATA;
+    end
+  end
+
+  // this is the actual d_insn we should use
+  always_comb begin
+    if (execute_state.cycle_status == CYCLE_LOAD2USE) begin
+      d_insn = d_insn_prev;
+    end else begin
+      d_insn = d_insn_curr;
+    end
+  end
+
   // this shows how to package up state in a `struct packed`, and how to pass it between stages
   stage_decode_t decode_state;
   always_ff @(posedge clk) begin
+    d_insn_prev <= d_insn_curr;
+
     if (rst) begin
-      decode_state <= '{pc: 0, insn: 0, cycle_status: CYCLE_RESET};
+      decode_state <= '{pc: 0, cycle_status: CYCLE_RESET};
     end else if (x_branching) begin
-      decode_state <= '{pc: 0, insn: 0, cycle_status: CYCLE_TAKEN_BRANCH};
+      decode_state <= '{pc: 0, cycle_status: CYCLE_TAKEN_BRANCH};
     end else if (x_load_stall || x_divide_to_use_stall || d_fence_stall) begin
-      decode_state <= '{
-          pc: decode_state.pc,
-          insn: decode_state.insn,
-          cycle_status: CYCLE_NO_STALL
-      };
+      decode_state <= '{pc: decode_state.pc, cycle_status: CYCLE_NO_STALL};
     end else begin
       begin
-        decode_state <= '{pc: f_pc_current, insn: f_insn, cycle_status: f_cycle_status};
+        decode_state <= '{pc: f_pc_current, cycle_status: f_cycle_status};
       end
     end
   end
@@ -538,7 +573,7 @@ module DatapathAxilMemory (
   Disasm #(
       .PREFIX("D")
   ) disasm_1decode (
-      .insn  (decode_state.insn),
+      .insn  (d_insn),
       .disasm(d_disasm)
   );
 
@@ -551,7 +586,7 @@ module DatapathAxilMemory (
   wire [`OPCODE_SIZE] d_insn_opcode;
 
   // split R-type instruction - see section 2.2 of RiscV spec
-  assign {d_insn_funct7, d_insn_rs2, d_insn_rs1, d_insn_funct3, d_insn_rd, d_insn_opcode} = decode_state.insn;
+  assign {d_insn_funct7, d_insn_rs2, d_insn_rs1, d_insn_funct3, d_insn_rd, d_insn_opcode} = d_insn;
 
   // set rs1 and rs2 to zero if unused; this is for checking specific conditions later (where we ignore
   // rs1 and rs2 if they are zero)
@@ -593,8 +628,8 @@ module DatapathAxilMemory (
   // setup for I, S, B & J type instructions
   // I - short immediates and loads
   wire [11:0] d_imm_i;
-  assign d_imm_i = decode_state.insn[31:20];
-  wire [ 4:0] d_imm_shamt = decode_state.insn[24:20];
+  assign d_imm_i = d_insn[31:20];
+  wire [ 4:0] d_imm_shamt = d_insn[24:20];
   wire [ 4:0] d_imm_i_4_0 = d_imm_i[4:0];
 
   // S - stores
@@ -610,12 +645,12 @@ module DatapathAxilMemory (
   // J - unconditional jumps
   wire [20:0] d_imm_j;
   assign {d_imm_j[20], d_imm_j[10:1], d_imm_j[11], d_imm_j[19:12], d_imm_j[0]} = {
-    decode_state.insn[31:12], 1'b0
+    d_insn[31:12], 1'b0
   };
 
   // U - setup for U type instructions
   wire [19:0] d_imm_u;
-  assign d_imm_u = decode_state.insn[31:12];
+  assign d_imm_u = d_insn[31:12];
 
   wire [`REG_SIZE] d_imm_i_sext = {{20{d_imm_i[11]}}, d_imm_i[11:0]};
   wire [`REG_SIZE] d_imm_s_sext = {{20{d_imm_s[11]}}, d_imm_s[11:0]};
@@ -642,55 +677,55 @@ module DatapathAxilMemory (
   wire d_insn_jal = d_insn_opcode == OpJal;
   wire d_insn_jalr = d_insn_opcode == OpJalr;
 
-  wire d_insn_beq = d_insn_opcode == OpBranch && decode_state.insn[14:12] == 3'b000;
-  wire d_insn_bne = d_insn_opcode == OpBranch && decode_state.insn[14:12] == 3'b001;
-  wire d_insn_blt = d_insn_opcode == OpBranch && decode_state.insn[14:12] == 3'b100;
-  wire d_insn_bge = d_insn_opcode == OpBranch && decode_state.insn[14:12] == 3'b101;
-  wire d_insn_bltu = d_insn_opcode == OpBranch && decode_state.insn[14:12] == 3'b110;
-  wire d_insn_bgeu = d_insn_opcode == OpBranch && decode_state.insn[14:12] == 3'b111;
+  wire d_insn_beq = d_insn_opcode == OpBranch && d_insn[14:12] == 3'b000;
+  wire d_insn_bne = d_insn_opcode == OpBranch && d_insn[14:12] == 3'b001;
+  wire d_insn_blt = d_insn_opcode == OpBranch && d_insn[14:12] == 3'b100;
+  wire d_insn_bge = d_insn_opcode == OpBranch && d_insn[14:12] == 3'b101;
+  wire d_insn_bltu = d_insn_opcode == OpBranch && d_insn[14:12] == 3'b110;
+  wire d_insn_bgeu = d_insn_opcode == OpBranch && d_insn[14:12] == 3'b111;
 
-  wire d_insn_lb = d_insn_opcode == OpLoad && decode_state.insn[14:12] == 3'b000;
-  wire d_insn_lh = d_insn_opcode == OpLoad && decode_state.insn[14:12] == 3'b001;
-  wire d_insn_lw = d_insn_opcode == OpLoad && decode_state.insn[14:12] == 3'b010;
-  wire d_insn_lbu = d_insn_opcode == OpLoad && decode_state.insn[14:12] == 3'b100;
-  wire d_insn_lhu = d_insn_opcode == OpLoad && decode_state.insn[14:12] == 3'b101;
+  wire d_insn_lb = d_insn_opcode == OpLoad && d_insn[14:12] == 3'b000;
+  wire d_insn_lh = d_insn_opcode == OpLoad && d_insn[14:12] == 3'b001;
+  wire d_insn_lw = d_insn_opcode == OpLoad && d_insn[14:12] == 3'b010;
+  wire d_insn_lbu = d_insn_opcode == OpLoad && d_insn[14:12] == 3'b100;
+  wire d_insn_lhu = d_insn_opcode == OpLoad && d_insn[14:12] == 3'b101;
 
-  wire d_insn_sb = d_insn_opcode == OpStore && decode_state.insn[14:12] == 3'b000;
-  wire d_insn_sh = d_insn_opcode == OpStore && decode_state.insn[14:12] == 3'b001;
-  wire d_insn_sw = d_insn_opcode == OpStore && decode_state.insn[14:12] == 3'b010;
+  wire d_insn_sb = d_insn_opcode == OpStore && d_insn[14:12] == 3'b000;
+  wire d_insn_sh = d_insn_opcode == OpStore && d_insn[14:12] == 3'b001;
+  wire d_insn_sw = d_insn_opcode == OpStore && d_insn[14:12] == 3'b010;
 
-  wire d_insn_addi = d_insn_opcode == OpRegImm && decode_state.insn[14:12] == 3'b000;
-  wire d_insn_slti = d_insn_opcode == OpRegImm && decode_state.insn[14:12] == 3'b010;
-  wire d_insn_sltiu = d_insn_opcode == OpRegImm && decode_state.insn[14:12] == 3'b011;
-  wire d_insn_xori = d_insn_opcode == OpRegImm && decode_state.insn[14:12] == 3'b100;
-  wire d_insn_ori = d_insn_opcode == OpRegImm && decode_state.insn[14:12] == 3'b110;
-  wire d_insn_andi = d_insn_opcode == OpRegImm && decode_state.insn[14:12] == 3'b111;
+  wire d_insn_addi = d_insn_opcode == OpRegImm && d_insn[14:12] == 3'b000;
+  wire d_insn_slti = d_insn_opcode == OpRegImm && d_insn[14:12] == 3'b010;
+  wire d_insn_sltiu = d_insn_opcode == OpRegImm && d_insn[14:12] == 3'b011;
+  wire d_insn_xori = d_insn_opcode == OpRegImm && d_insn[14:12] == 3'b100;
+  wire d_insn_ori = d_insn_opcode == OpRegImm && d_insn[14:12] == 3'b110;
+  wire d_insn_andi = d_insn_opcode == OpRegImm && d_insn[14:12] == 3'b111;
 
-  wire d_insn_slli = d_insn_opcode == OpRegImm && decode_state.insn[14:12] == 3'b001 && decode_state.insn[31:25] == 7'd0;
-  wire d_insn_srli = d_insn_opcode == OpRegImm && decode_state.insn[14:12] == 3'b101 && decode_state.insn[31:25] == 7'd0;
-  wire d_insn_srai = d_insn_opcode == OpRegImm && decode_state.insn[14:12] == 3'b101 && decode_state.insn[31:25] == 7'b0100000;
+  wire d_insn_slli = d_insn_opcode == OpRegImm && d_insn[14:12] == 3'b001 && d_insn[31:25] == 7'd0;
+  wire d_insn_srli = d_insn_opcode == OpRegImm && d_insn[14:12] == 3'b101 && d_insn[31:25] == 7'd0;
+  wire d_insn_srai = d_insn_opcode == OpRegImm && d_insn[14:12] == 3'b101 && d_insn[31:25] == 7'b0100000;
 
-  wire d_insn_add = d_insn_opcode == OpRegReg && decode_state.insn[14:12] == 3'b000 && decode_state.insn[31:25] == 7'd0;
-  wire d_insn_sub  = d_insn_opcode == OpRegReg && decode_state.insn[14:12] == 3'b000 && decode_state.insn[31:25] == 7'b0100000;
-  wire d_insn_sll = d_insn_opcode == OpRegReg && decode_state.insn[14:12] == 3'b001 && decode_state.insn[31:25] == 7'd0;
-  wire d_insn_slt = d_insn_opcode == OpRegReg && decode_state.insn[14:12] == 3'b010 && decode_state.insn[31:25] == 7'd0;
-  wire d_insn_sltu = d_insn_opcode == OpRegReg && decode_state.insn[14:12] == 3'b011 && decode_state.insn[31:25] == 7'd0;
-  wire d_insn_xor = d_insn_opcode == OpRegReg && decode_state.insn[14:12] == 3'b100 && decode_state.insn[31:25] == 7'd0;
-  wire d_insn_srl = d_insn_opcode == OpRegReg && decode_state.insn[14:12] == 3'b101 && decode_state.insn[31:25] == 7'd0;
-  wire d_insn_sra  = d_insn_opcode == OpRegReg && decode_state.insn[14:12] == 3'b101 && decode_state.insn[31:25] == 7'b0100000;
-  wire d_insn_or = d_insn_opcode == OpRegReg && decode_state.insn[14:12] == 3'b110 && decode_state.insn[31:25] == 7'd0;
-  wire d_insn_and = d_insn_opcode == OpRegReg && decode_state.insn[14:12] == 3'b111 && decode_state.insn[31:25] == 7'd0;
+  wire d_insn_add = d_insn_opcode == OpRegReg && d_insn[14:12] == 3'b000 && d_insn[31:25] == 7'd0;
+  wire d_insn_sub  = d_insn_opcode == OpRegReg && d_insn[14:12] == 3'b000 && d_insn[31:25] == 7'b0100000;
+  wire d_insn_sll = d_insn_opcode == OpRegReg && d_insn[14:12] == 3'b001 && d_insn[31:25] == 7'd0;
+  wire d_insn_slt = d_insn_opcode == OpRegReg && d_insn[14:12] == 3'b010 && d_insn[31:25] == 7'd0;
+  wire d_insn_sltu = d_insn_opcode == OpRegReg && d_insn[14:12] == 3'b011 && d_insn[31:25] == 7'd0;
+  wire d_insn_xor = d_insn_opcode == OpRegReg && d_insn[14:12] == 3'b100 && d_insn[31:25] == 7'd0;
+  wire d_insn_srl = d_insn_opcode == OpRegReg && d_insn[14:12] == 3'b101 && d_insn[31:25] == 7'd0;
+  wire d_insn_sra  = d_insn_opcode == OpRegReg && d_insn[14:12] == 3'b101 && d_insn[31:25] == 7'b0100000;
+  wire d_insn_or = d_insn_opcode == OpRegReg && d_insn[14:12] == 3'b110 && d_insn[31:25] == 7'd0;
+  wire d_insn_and = d_insn_opcode == OpRegReg && d_insn[14:12] == 3'b111 && d_insn[31:25] == 7'd0;
 
-  wire d_insn_mul    = d_insn_opcode == OpRegReg && decode_state.insn[31:25] == 7'd1 && decode_state.insn[14:12] == 3'b000;
-  wire d_insn_mulh   = d_insn_opcode == OpRegReg && decode_state.insn[31:25] == 7'd1 && decode_state.insn[14:12] == 3'b001;
-  wire d_insn_mulhsu = d_insn_opcode == OpRegReg && decode_state.insn[31:25] == 7'd1 && decode_state.insn[14:12] == 3'b010;
-  wire d_insn_mulhu  = d_insn_opcode == OpRegReg && decode_state.insn[31:25] == 7'd1 && decode_state.insn[14:12] == 3'b011;
-  wire d_insn_div    = d_insn_opcode == OpRegReg && decode_state.insn[31:25] == 7'd1 && decode_state.insn[14:12] == 3'b100;
-  wire d_insn_divu   = d_insn_opcode == OpRegReg && decode_state.insn[31:25] == 7'd1 && decode_state.insn[14:12] == 3'b101;
-  wire d_insn_rem    = d_insn_opcode == OpRegReg && decode_state.insn[31:25] == 7'd1 && decode_state.insn[14:12] == 3'b110;
-  wire d_insn_remu   = d_insn_opcode == OpRegReg && decode_state.insn[31:25] == 7'd1 && decode_state.insn[14:12] == 3'b111;
+  wire d_insn_mul = d_insn_opcode == OpRegReg && d_insn[31:25] == 7'd1 && d_insn[14:12] == 3'b000;
+  wire d_insn_mulh = d_insn_opcode == OpRegReg && d_insn[31:25] == 7'd1 && d_insn[14:12] == 3'b001;
+  wire d_insn_mulhsu = d_insn_opcode == OpRegReg && d_insn[31:25] == 7'd1 && d_insn[14:12] == 3'b010;
+  wire d_insn_mulhu = d_insn_opcode == OpRegReg && d_insn[31:25] == 7'd1 && d_insn[14:12] == 3'b011;
+  wire d_insn_div = d_insn_opcode == OpRegReg && d_insn[31:25] == 7'd1 && d_insn[14:12] == 3'b100;
+  wire d_insn_divu = d_insn_opcode == OpRegReg && d_insn[31:25] == 7'd1 && d_insn[14:12] == 3'b101;
+  wire d_insn_rem = d_insn_opcode == OpRegReg && d_insn[31:25] == 7'd1 && d_insn[14:12] == 3'b110;
+  wire d_insn_remu = d_insn_opcode == OpRegReg && d_insn[31:25] == 7'd1 && d_insn[14:12] == 3'b111;
 
-  wire d_insn_ecall = d_insn_opcode == OpEnviron && decode_state.insn[31:7] == 25'd0;
+  wire d_insn_ecall = d_insn_opcode == OpEnviron && d_insn[31:7] == 25'd0;
   wire d_insn_fence = d_insn_opcode == OpMiscMem;
 
   logic [5:0] d_insn_name;
@@ -862,24 +897,6 @@ module DatapathAxilMemory (
           insn_name: 0
       };
     end else if (x_divide_to_use_stall) begin
-      // execute_state <= '{
-      //     pc: execute_state.pc,
-      //     insn: execute_state.insn,
-      //     cycle_status: CYCLE_DIV2USE,
-
-      //     rs1: execute_state.rs1,
-      //     rs2: execute_state.rs2,
-      //     rd: execute_state.rd,
-
-      //     imm_u: execute_state.imm_u,
-      //     imm_i_4_0: execute_state.imm_i_4_0,
-      //     imm_i_sext: execute_state.imm_i_sext,
-      //     imm_b_sext: execute_state.imm_b_sext,
-      //     imm_s_sext: execute_state.imm_s_sext,
-      //     imm_j_sext: execute_state.imm_j_sext,
-
-      //     insn_name: execute_state.insn_name
-      // };
       execute_state <= '{
           pc: 0,
           insn: 0,
@@ -921,7 +938,7 @@ module DatapathAxilMemory (
       begin
         execute_state <= '{
             pc: decode_state.pc,
-            insn: decode_state.insn,
+            insn: d_insn,
             cycle_status: decode_state.cycle_status,
 
             rs1: d_insn_rs1,
@@ -971,6 +988,7 @@ module DatapathAxilMemory (
   // - First we check for a MX bypass, i.e. if x-rs1 = m-rd
   // - Otherwise, we check for a WX bypass, i.e. if x-rs1 = w-rd
   // - Otherwise, we just use the value we got from the register file
+  // - We also don't want to do the 
   logic [`REG_SIZE] x_bp_rs1_data, x_bp_rs2_data;
   assign x_bp_rs1_data = ((execute_state.rs1 == memory_state.rd) && (execute_state.rs1 != 0)) ? memory_state.rd_data : (
     ((execute_state.rs1 == writeback_state.rd) && (execute_state.rs1 != 0)) ? writeback_state.rd_data : x_rs1_data
@@ -1642,7 +1660,7 @@ module DatapathAxilMemory (
     end
   end
 
-  // MW bypassing
+  // WM bypassing
   // Checks:
   // - Writeback state has a load insn
   // - Memory state has a save insn
@@ -1650,8 +1668,10 @@ module DatapathAxilMemory (
   assign m_bp_rs2_data = ((memory_state.rs2 == writeback_state.rd) && writeback_state.is_load_insn && m_is_save_insn) ? writeback_state.rd_data : memory_state.rs2_data;
 
   always_comb begin
-    m_addr_to_dmem   = 0;
-    store_we_to_dmem = 0;
+    m_addr_to_dmem = 0;
+    dmem.WSTRB = 0;
+    dmem.WVALID = 0;
+    dmem.AWVALID = 0;
 
     case (memory_state.insn_name)
 
@@ -1669,16 +1689,16 @@ module DatapathAxilMemory (
         // We also need to sign-extend our result manually
         case (memory_state.addr_to_dmem[1:0])
           2'b00: begin
-            m_rd_data = {{24{load_data_from_dmem[7]}}, load_data_from_dmem[7:0]};
+            m_rd_data = {{24{dmem.RDATA[7]}}, dmem.RDATA[7:0]};
           end
           2'b01: begin
-            m_rd_data = {{24{load_data_from_dmem[15]}}, load_data_from_dmem[15:8]};
+            m_rd_data = {{24{dmem.RDATA[15]}}, dmem.RDATA[15:8]};
           end
           2'b10: begin
-            m_rd_data = {{24{load_data_from_dmem[23]}}, load_data_from_dmem[23:16]};
+            m_rd_data = {{24{dmem.RDATA[23]}}, dmem.RDATA[23:16]};
           end
           2'b11: begin
-            m_rd_data = {{24{load_data_from_dmem[31]}}, load_data_from_dmem[31:24]};
+            m_rd_data = {{24{dmem.RDATA[31]}}, dmem.RDATA[31:24]};
           end
           default: begin
           end
@@ -1692,16 +1712,16 @@ module DatapathAxilMemory (
         // We also need to ZERO-extend our result manually
         case (memory_state.addr_to_dmem[1:0])
           2'b00: begin
-            m_rd_data = {24'b0, load_data_from_dmem[7:0]};
+            m_rd_data = {24'b0, dmem.RDATA[7:0]};
           end
           2'b01: begin
-            m_rd_data = {24'b0, load_data_from_dmem[15:8]};
+            m_rd_data = {24'b0, dmem.RDATA[15:8]};
           end
           2'b10: begin
-            m_rd_data = {24'b0, load_data_from_dmem[23:16]};
+            m_rd_data = {24'b0, dmem.RDATA[23:16]};
           end
           2'b11: begin
-            m_rd_data = {24'b0, load_data_from_dmem[31:24]};
+            m_rd_data = {24'b0, dmem.RDATA[31:24]};
           end
           default: begin
           end
@@ -1709,16 +1729,17 @@ module DatapathAxilMemory (
       end
 
       InsnLh: begin
+
         // Only allow aligned addresses (last bit must be 0)
         if (memory_state.addr_to_dmem[0] == 0) begin
           m_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
 
           case (memory_state.addr_to_dmem[1])
             1'b0: begin
-              m_rd_data = {{16{load_data_from_dmem[15]}}, load_data_from_dmem[15:0]};
+              m_rd_data = {{16{dmem.RDATA[15]}}, dmem.RDATA[15:0]};
             end
             1'b1: begin
-              m_rd_data = {{16{load_data_from_dmem[31]}}, load_data_from_dmem[31:16]};
+              m_rd_data = {{16{dmem.RDATA[31]}}, dmem.RDATA[31:16]};
             end
             default: begin
             end
@@ -1727,16 +1748,17 @@ module DatapathAxilMemory (
       end
 
       InsnLhu: begin
+
         // Only allow aligned addresses (last bit must be 0)
         if (memory_state.addr_to_dmem[0] == 0) begin
           m_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
 
           case (memory_state.addr_to_dmem[1])
             1'b0: begin
-              m_rd_data = {16'b0, load_data_from_dmem[15:0]};
+              m_rd_data = {16'b0, dmem.RDATA[15:0]};
             end
             1'b1: begin
-              m_rd_data = {16'b0, load_data_from_dmem[31:16]};
+              m_rd_data = {16'b0, dmem.RDATA[31:16]};
             end
             default: begin
             end
@@ -1745,33 +1767,36 @@ module DatapathAxilMemory (
       end
 
       InsnLw: begin
+
         // Only allow aligned addresses (last two bits must be 0)
         if (memory_state.addr_to_dmem[1:0] == 2'b0) begin
-          m_rd_data = load_data_from_dmem;
+          m_rd_data = dmem.RDATA;
           m_addr_to_dmem = memory_state.addr_to_dmem;
         end
       end
 
       /* SAVE INSNS */
       InsnSb: begin
+        dmem.WVALID = 1;
+        dmem.AWVALID = 1;
         m_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
 
         case (memory_state.addr_to_dmem[1:0])
           2'b00: begin
-            store_we_to_dmem   = 4'b0001;
-            store_data_to_dmem = {24'b0, m_bp_rs2_data[7:0]};
+            dmem.WSTRB = 4'b0001;
+            dmem.WDATA = {24'b0, m_bp_rs2_data[7:0]};
           end
           2'b01: begin
-            store_we_to_dmem   = 4'b0010;
-            store_data_to_dmem = {16'b0, m_bp_rs2_data[7:0], 8'b0};
+            dmem.WSTRB = 4'b0010;
+            dmem.WDATA = {16'b0, m_bp_rs2_data[7:0], 8'b0};
           end
           2'b10: begin
-            store_we_to_dmem   = 4'b0100;
-            store_data_to_dmem = {8'b0, m_bp_rs2_data[7:0], 16'b0};
+            dmem.WSTRB = 4'b0100;
+            dmem.WDATA = {8'b0, m_bp_rs2_data[7:0], 16'b0};
           end
           2'b11: begin
-            store_we_to_dmem   = 4'b1000;
-            store_data_to_dmem = {m_bp_rs2_data[7:0], 24'b0};
+            dmem.WSTRB = 4'b1000;
+            dmem.WDATA = {m_bp_rs2_data[7:0], 24'b0};
           end
           default: begin
           end
@@ -1779,18 +1804,20 @@ module DatapathAxilMemory (
       end
 
       InsnSh: begin
+        dmem.WVALID  = 1;
+        dmem.AWVALID = 1;
         if (memory_state.addr_to_dmem[0] == 0) begin
           m_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
 
           // Choose which byte to store in this word
           case (memory_state.addr_to_dmem[1])
             1'b0: begin
-              store_we_to_dmem   = 4'b0011;
-              store_data_to_dmem = {16'b0, m_bp_rs2_data[15:0]};
+              dmem.WSTRB = 4'b0011;
+              dmem.WDATA = {16'b0, m_bp_rs2_data[15:0]};
             end
             1'b1: begin
-              store_we_to_dmem   = 4'b1100;
-              store_data_to_dmem = {m_bp_rs2_data[15:0], 16'b0};
+              dmem.WSTRB = 4'b1100;
+              dmem.WDATA = {m_bp_rs2_data[15:0], 16'b0};
             end
             default: begin
             end
@@ -1799,10 +1826,12 @@ module DatapathAxilMemory (
       end
 
       InsnSw: begin
+        dmem.WVALID  = 1;
+        dmem.AWVALID = 1;
         if (memory_state.addr_to_dmem[1:0] == 2'b0) begin
           m_addr_to_dmem = memory_state.addr_to_dmem;
-          store_we_to_dmem = 4'b1111;
-          store_data_to_dmem = m_bp_rs2_data;
+          dmem.WSTRB = 4'b1111;
+          dmem.WDATA = m_bp_rs2_data;
         end
       end
 
@@ -1849,7 +1878,10 @@ module DatapathAxilMemory (
   end
 
   // Update addr_to_dmem
-  assign addr_to_dmem = m_addr_to_dmem;
+  always_comb begin
+    dmem.ARVALID = 1;
+    dmem.ARADDR  = m_addr_to_dmem;
+  end
 
 
   /*******************/
@@ -1924,78 +1956,78 @@ module DatapathAxilMemory (
 
 endmodule
 
-module MemorySingleCycle #(
-    parameter int NUM_WORDS = 512
-) (
-    // rst for both imem and dmem
-    input wire rst,
+// module MemorySingleCycle #(
+//     parameter int NUM_WORDS = 512
+// ) (
+//     // rst for both imem and dmem
+//     input wire rst,
 
-    // clock for both imem and dmem. The memory reads/writes on @(negedge clk)
-    input wire clk,
+//     // clock for both imem and dmem. The memory reads/writes on @(negedge clk)
+//     input wire clk,
 
-    // must always be aligned to a 4B boundary
-    input wire [`REG_SIZE] pc_to_imem,
+//     // must always be aligned to a 4B boundary
+//     input wire [`REG_SIZE] pc_to_imem,
 
-    // the value at memory location pc_to_imem
-    output logic [`REG_SIZE] insn_from_imem,
+//     // the value at memory location pc_to_imem
+//     output logic [`REG_SIZE] insn_from_imem,
 
-    // must always be aligned to a 4B boundary
-    input wire [`REG_SIZE] addr_to_dmem,
+//     // must always be aligned to a 4B boundary
+//     input wire [`REG_SIZE] addr_to_dmem,
 
-    // the value at memory location addr_to_dmem
-    output logic [`REG_SIZE] load_data_from_dmem,
+//     // the value at memory location addr_to_dmem
+//     output logic [`REG_SIZE] load_data_from_dmem,
 
-    // the value to be written to addr_to_dmem, controlled by store_we_to_dmem
-    input wire [`REG_SIZE] store_data_to_dmem,
+//     // the value to be written to addr_to_dmem, controlled by store_we_to_dmem
+//     input wire [`REG_SIZE] store_data_to_dmem,
 
-    // Each bit determines whether to write the corresponding byte of store_data_to_dmem to memory location addr_to_dmem.
-    // E.g., 4'b1111 will write 4 bytes. 4'b0001 will write only the least-significant byte.
-    input wire [3:0] store_we_to_dmem
-);
+//     // Each bit determines whether to write the corresponding byte of store_data_to_dmem to memory location addr_to_dmem.
+//     // E.g., 4'b1111 will write 4 bytes. 4'b0001 will write only the least-significant byte.
+//     input wire [3:0] store_we_to_dmem
+// );
 
-  // memory is arranged as an array of 4B words
-  logic [`REG_SIZE] mem[NUM_WORDS];
+//   // memory is arranged as an array of 4B words
+//   logic [`REG_SIZE] mem[NUM_WORDS];
 
-  initial begin
-    $readmemh("mem_initial_contents.hex", mem, 0);
-  end
+//   initial begin
+//     $readmemh("mem_initial_contents.hex", mem, 0);
+//   end
 
-  always_comb begin
-    // memory addresses should always be 4B-aligned
-    assert (pc_to_imem[1:0] == 2'b00);
-    assert (addr_to_dmem[1:0] == 2'b00);
-  end
+//   always_comb begin
+//     // memory addresses should always be 4B-aligned
+//     assert (pc_to_imem[1:0] == 2'b00);
+//     assert (addr_to_dmem[1:0] == 2'b00);
+//   end
 
-  localparam int AddrMsb = $clog2(NUM_WORDS) + 1;
-  localparam int AddrLsb = 2;
+//   localparam int AddrMsb = $clog2(NUM_WORDS) + 1;
+//   localparam int AddrLsb = 2;
 
-  always @(negedge clk) begin
-    if (rst) begin
-    end else begin
-      insn_from_imem <= mem[{pc_to_imem[AddrMsb:AddrLsb]}];
-    end
-  end
+//   always @(negedge clk) begin
+//     if (rst) begin
+//     end else begin
+//       insn_from_imem <= mem[{pc_to_imem[AddrMsb:AddrLsb]}];
+//     end
+//   end
 
-  always @(negedge clk) begin
-    if (rst) begin
-    end else begin
-      if (store_we_to_dmem[0]) begin
-        mem[addr_to_dmem[AddrMsb:AddrLsb]][7:0] <= store_data_to_dmem[7:0];
-      end
-      if (store_we_to_dmem[1]) begin
-        mem[addr_to_dmem[AddrMsb:AddrLsb]][15:8] <= store_data_to_dmem[15:8];
-      end
-      if (store_we_to_dmem[2]) begin
-        mem[addr_to_dmem[AddrMsb:AddrLsb]][23:16] <= store_data_to_dmem[23:16];
-      end
-      if (store_we_to_dmem[3]) begin
-        mem[addr_to_dmem[AddrMsb:AddrLsb]][31:24] <= store_data_to_dmem[31:24];
-      end
-      // dmem is "read-first": read returns value before the write
-      load_data_from_dmem <= mem[{addr_to_dmem[AddrMsb:AddrLsb]}];
-    end
-  end
-endmodule
+//   always @(negedge clk) begin
+//     if (rst) begin
+//     end else begin
+//       if (store_we_to_dmem[0]) begin
+//         mem[addr_to_dmem[AddrMsb:AddrLsb]][7:0] <= store_data_to_dmem[7:0];
+//       end
+//       if (store_we_to_dmem[1]) begin
+//         mem[addr_to_dmem[AddrMsb:AddrLsb]][15:8] <= store_data_to_dmem[15:8];
+//       end
+//       if (store_we_to_dmem[2]) begin
+//         mem[addr_to_dmem[AddrMsb:AddrLsb]][23:16] <= store_data_to_dmem[23:16];
+//       end
+//       if (store_we_to_dmem[3]) begin
+//         mem[addr_to_dmem[AddrMsb:AddrLsb]][31:24] <= store_data_to_dmem[31:24];
+//       end
+//       // dmem is "read-first": read returns value before the write
+//       load_data_from_dmem <= mem[{addr_to_dmem[AddrMsb:AddrLsb]}];
+//     end
+//   end
+// endmodule
 
 /* This design has just one clock for both processor and memory. */
 module RiscvProcessor (
@@ -2008,23 +2040,23 @@ module RiscvProcessor (
 );
 
   // HW5 memory interface
-  wire [`INSN_SIZE] insn_from_imem;
-  wire [`REG_SIZE] pc_to_imem, mem_data_addr, mem_data_loaded_value, mem_data_to_write;
-  wire [3:0] mem_data_we;
-  MemorySingleCycle #(
-      .NUM_WORDS(8192)
-  ) the_mem (
-      .rst                (rst),
-      .clk                (clk),
-      // imem is read-only
-      .pc_to_imem         (pc_to_imem),
-      .insn_from_imem     (insn_from_imem),
-      // dmem is read-write
-      .addr_to_dmem       (mem_data_addr),
-      .load_data_from_dmem(mem_data_loaded_value),
-      .store_data_to_dmem (mem_data_to_write),
-      .store_we_to_dmem   (mem_data_we)
-  );
+  // wire [`INSN_SIZE] insn_from_imem;
+  // wire [`REG_SIZE] pc_to_imem, mem_data_addr, mem_data_loaded_value, mem_data_to_write;
+  // wire [3:0] mem_data_we;
+  // MemorySingleCycle #(
+  //     .NUM_WORDS(8192)
+  // ) the_mem (
+  //     .rst                (rst),
+  //     .clk                (clk),
+  //     // imem is read-only
+  //     .pc_to_imem         (pc_to_imem),
+  //     .insn_from_imem     (insn_from_imem),
+  //     // dmem is read-write
+  //     .addr_to_dmem       (mem_data_addr),
+  //     .load_data_from_dmem(mem_data_loaded_value),
+  //     .store_data_to_dmem (mem_data_to_write),
+  //     .store_we_to_dmem   (mem_data_we)
+  // );
 
   // HW6 memory interface
   axi_clkrst_if axi_cr (
@@ -2042,19 +2074,17 @@ module RiscvProcessor (
   );
 
   DatapathAxilMemory datapath (
-      .clk(clk),
-      .rst(rst),
-      // .imem(axi_insn.manager),
-      .pc_to_imem(pc_to_imem),
-      .insn_from_imem(insn_from_imem),
+      .clk (clk),
+      .rst (rst),
+      .imem(axi_insn.manager),
+      // .pc_to_imem(pc_to_imem),
+      // .insn_from_imem(insn_from_imem),
+      .dmem(axi_data.manager),
 
-
-      // .dmem(axi_data.manager),
-
-      .addr_to_dmem(mem_data_addr),
-      .load_data_from_dmem(mem_data_loaded_value),
-      .store_data_to_dmem(mem_data_to_write),
-      .store_we_to_dmem(mem_data_we),
+      // .addr_to_dmem(mem_data_addr),
+      // .load_data_from_dmem(mem_data_loaded_value),
+      // .store_data_to_dmem(mem_data_to_write),
+      // .store_we_to_dmem(mem_data_we),
 
 
       .halt(halt),
