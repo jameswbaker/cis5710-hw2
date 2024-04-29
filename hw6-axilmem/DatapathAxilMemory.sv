@@ -1645,7 +1645,8 @@ module DatapathAxilMemory (
 
   logic [`REG_SIZE] m_rd_data;
   logic [`REG_SIZE] m_bp_rs2_data;
-  logic [`REG_SIZE] m_addr_to_dmem;
+  logic [`REG_SIZE] m_r_addr_to_dmem;
+  logic [`REG_SIZE] m_w_addr_to_dmem;
 
   logic m_is_save_insn;
   always_comb begin
@@ -1668,10 +1669,13 @@ module DatapathAxilMemory (
   assign m_bp_rs2_data = ((memory_state.rs2 == writeback_state.rd) && writeback_state.is_load_insn && m_is_save_insn) ? writeback_state.rd_data : memory_state.rs2_data;
 
   always_comb begin
-    m_addr_to_dmem = 0;
+    m_r_addr_to_dmem = 0;
+    m_w_addr_to_dmem = 0;
+
     dmem.WSTRB = 0;
     dmem.WVALID = 0;
     dmem.AWVALID = 0;
+    dmem.BREADY = 0;
 
     case (memory_state.insn_name)
 
@@ -1683,7 +1687,7 @@ module DatapathAxilMemory (
 
       /* LOAD INSNS */
       InsnLb: begin
-        m_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
+        m_r_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
 
         // Choose which byte of the loaded word to take
         // We also need to sign-extend our result manually
@@ -1706,7 +1710,7 @@ module DatapathAxilMemory (
       end
 
       InsnLbu: begin
-        m_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
+        m_r_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
 
         // Choose which byte of the loaded word to take
         // We also need to ZERO-extend our result manually
@@ -1732,7 +1736,7 @@ module DatapathAxilMemory (
 
         // Only allow aligned addresses (last bit must be 0)
         if (memory_state.addr_to_dmem[0] == 0) begin
-          m_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
+          m_r_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
 
           case (memory_state.addr_to_dmem[1])
             1'b0: begin
@@ -1751,7 +1755,7 @@ module DatapathAxilMemory (
 
         // Only allow aligned addresses (last bit must be 0)
         if (memory_state.addr_to_dmem[0] == 0) begin
-          m_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
+          m_r_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
 
           case (memory_state.addr_to_dmem[1])
             1'b0: begin
@@ -1771,7 +1775,7 @@ module DatapathAxilMemory (
         // Only allow aligned addresses (last two bits must be 0)
         if (memory_state.addr_to_dmem[1:0] == 2'b0) begin
           m_rd_data = dmem.RDATA;
-          m_addr_to_dmem = memory_state.addr_to_dmem;
+          m_r_addr_to_dmem = memory_state.addr_to_dmem;
         end
       end
 
@@ -1779,7 +1783,8 @@ module DatapathAxilMemory (
       InsnSb: begin
         dmem.WVALID = 1;
         dmem.AWVALID = 1;
-        m_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
+        dmem.BREADY = 1;
+        m_w_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
 
         case (memory_state.addr_to_dmem[1:0])
           2'b00: begin
@@ -1806,8 +1811,9 @@ module DatapathAxilMemory (
       InsnSh: begin
         dmem.WVALID  = 1;
         dmem.AWVALID = 1;
+        dmem.BREADY  = 1;
         if (memory_state.addr_to_dmem[0] == 0) begin
-          m_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
+          m_w_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
 
           // Choose which byte to store in this word
           case (memory_state.addr_to_dmem[1])
@@ -1828,8 +1834,9 @@ module DatapathAxilMemory (
       InsnSw: begin
         dmem.WVALID  = 1;
         dmem.AWVALID = 1;
+        dmem.BREADY  = 1;
         if (memory_state.addr_to_dmem[1:0] == 2'b0) begin
-          m_addr_to_dmem = memory_state.addr_to_dmem;
+          m_w_addr_to_dmem = memory_state.addr_to_dmem;
           dmem.WSTRB = 4'b1111;
           dmem.WDATA = m_bp_rs2_data;
         end
@@ -1880,7 +1887,8 @@ module DatapathAxilMemory (
   // Update addr_to_dmem
   always_comb begin
     dmem.ARVALID = 1;
-    dmem.ARADDR  = m_addr_to_dmem;
+    dmem.ARADDR  = m_r_addr_to_dmem;
+    dmem.AWADDR  = m_w_addr_to_dmem;
   end
 
 
@@ -1956,79 +1964,6 @@ module DatapathAxilMemory (
 
 endmodule
 
-// module MemorySingleCycle #(
-//     parameter int NUM_WORDS = 512
-// ) (
-//     // rst for both imem and dmem
-//     input wire rst,
-
-//     // clock for both imem and dmem. The memory reads/writes on @(negedge clk)
-//     input wire clk,
-
-//     // must always be aligned to a 4B boundary
-//     input wire [`REG_SIZE] pc_to_imem,
-
-//     // the value at memory location pc_to_imem
-//     output logic [`REG_SIZE] insn_from_imem,
-
-//     // must always be aligned to a 4B boundary
-//     input wire [`REG_SIZE] addr_to_dmem,
-
-//     // the value at memory location addr_to_dmem
-//     output logic [`REG_SIZE] load_data_from_dmem,
-
-//     // the value to be written to addr_to_dmem, controlled by store_we_to_dmem
-//     input wire [`REG_SIZE] store_data_to_dmem,
-
-//     // Each bit determines whether to write the corresponding byte of store_data_to_dmem to memory location addr_to_dmem.
-//     // E.g., 4'b1111 will write 4 bytes. 4'b0001 will write only the least-significant byte.
-//     input wire [3:0] store_we_to_dmem
-// );
-
-//   // memory is arranged as an array of 4B words
-//   logic [`REG_SIZE] mem[NUM_WORDS];
-
-//   initial begin
-//     $readmemh("mem_initial_contents.hex", mem, 0);
-//   end
-
-//   always_comb begin
-//     // memory addresses should always be 4B-aligned
-//     assert (pc_to_imem[1:0] == 2'b00);
-//     assert (addr_to_dmem[1:0] == 2'b00);
-//   end
-
-//   localparam int AddrMsb = $clog2(NUM_WORDS) + 1;
-//   localparam int AddrLsb = 2;
-
-//   always @(negedge clk) begin
-//     if (rst) begin
-//     end else begin
-//       insn_from_imem <= mem[{pc_to_imem[AddrMsb:AddrLsb]}];
-//     end
-//   end
-
-//   always @(negedge clk) begin
-//     if (rst) begin
-//     end else begin
-//       if (store_we_to_dmem[0]) begin
-//         mem[addr_to_dmem[AddrMsb:AddrLsb]][7:0] <= store_data_to_dmem[7:0];
-//       end
-//       if (store_we_to_dmem[1]) begin
-//         mem[addr_to_dmem[AddrMsb:AddrLsb]][15:8] <= store_data_to_dmem[15:8];
-//       end
-//       if (store_we_to_dmem[2]) begin
-//         mem[addr_to_dmem[AddrMsb:AddrLsb]][23:16] <= store_data_to_dmem[23:16];
-//       end
-//       if (store_we_to_dmem[3]) begin
-//         mem[addr_to_dmem[AddrMsb:AddrLsb]][31:24] <= store_data_to_dmem[31:24];
-//       end
-//       // dmem is "read-first": read returns value before the write
-//       load_data_from_dmem <= mem[{addr_to_dmem[AddrMsb:AddrLsb]}];
-//     end
-//   end
-// endmodule
-
 /* This design has just one clock for both processor and memory. */
 module RiscvProcessor (
     input wire clk,
@@ -2038,25 +1973,6 @@ module RiscvProcessor (
     output wire [`INSN_SIZE] trace_writeback_insn,
     output cycle_status_e trace_writeback_cycle_status
 );
-
-  // HW5 memory interface
-  // wire [`INSN_SIZE] insn_from_imem;
-  // wire [`REG_SIZE] pc_to_imem, mem_data_addr, mem_data_loaded_value, mem_data_to_write;
-  // wire [3:0] mem_data_we;
-  // MemorySingleCycle #(
-  //     .NUM_WORDS(8192)
-  // ) the_mem (
-  //     .rst                (rst),
-  //     .clk                (clk),
-  //     // imem is read-only
-  //     .pc_to_imem         (pc_to_imem),
-  //     .insn_from_imem     (insn_from_imem),
-  //     // dmem is read-write
-  //     .addr_to_dmem       (mem_data_addr),
-  //     .load_data_from_dmem(mem_data_loaded_value),
-  //     .store_data_to_dmem (mem_data_to_write),
-  //     .store_we_to_dmem   (mem_data_we)
-  // );
 
   // HW6 memory interface
   axi_clkrst_if axi_cr (
@@ -2074,19 +1990,10 @@ module RiscvProcessor (
   );
 
   DatapathAxilMemory datapath (
-      .clk (clk),
-      .rst (rst),
+      .clk(clk),
+      .rst(rst),
       .imem(axi_insn.manager),
-      // .pc_to_imem(pc_to_imem),
-      // .insn_from_imem(insn_from_imem),
       .dmem(axi_data.manager),
-
-      // .addr_to_dmem(mem_data_addr),
-      // .load_data_from_dmem(mem_data_loaded_value),
-      // .store_data_to_dmem(mem_data_to_write),
-      // .store_we_to_dmem(mem_data_we),
-
-
       .halt(halt),
       .trace_writeback_pc(trace_writeback_pc),
       .trace_writeback_insn(trace_writeback_insn),
