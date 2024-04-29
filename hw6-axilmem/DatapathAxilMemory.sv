@@ -545,7 +545,7 @@ module DatapathAxilMemory (
 
   // this is the actual d_insn we should use
   always_comb begin
-    if (execute_state.cycle_status == CYCLE_LOAD2USE) begin
+    if (execute_state.cycle_status == CYCLE_LOAD2USE || execute_state.cycle_status == CYCLE_DIV2USE) begin
       d_insn = d_insn_prev;
     end else begin
       d_insn = d_insn_curr;
