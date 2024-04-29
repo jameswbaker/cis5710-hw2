@@ -163,8 +163,12 @@ typedef struct packed {
   logic [`INSN_SIZE] insn;
   cycle_status_e cycle_status;
 
+  logic [5:0] insn_name;
+
   logic [4:0] rd;
   logic [`REG_SIZE] rd_data;
+
+  logic [`REG_SIZE] addr_to_dmem;
 
   logic is_load_insn;
 
@@ -557,7 +561,7 @@ module DatapathAxilMemory (
   stage_decode_t decode_state;
   always_ff @(posedge clk) begin
     // if (execute_state.cycle_status == CYCLE_LOAD2USE || execute_state.cycle_status == CYCLE_DIV2USE) begin
-    if (execute_state.cycle_status == CYCLE_LOAD2USE || execute_state.cycle_status == CYCLE_DIV2USE) begin
+    if (d_stalling) begin
       d_insn_prev <= d_insn_prev;
     end else begin
       d_insn_prev <= d_insn;
@@ -567,6 +571,7 @@ module DatapathAxilMemory (
       d_stalling   <= 0;
       decode_state <= '{pc: 0, cycle_status: CYCLE_RESET};
     end else if (x_branching) begin
+      d_stalling   <= 0;
       decode_state <= '{pc: 0, cycle_status: CYCLE_TAKEN_BRANCH};
     end else if (x_load_stall || x_divide_to_use_stall || d_fence_stall) begin
       d_stalling   <= 1;
@@ -998,10 +1003,10 @@ module DatapathAxilMemory (
   // - We also don't want to do the 
   logic [`REG_SIZE] x_bp_rs1_data, x_bp_rs2_data;
   assign x_bp_rs1_data = ((execute_state.rs1 == memory_state.rd) && (execute_state.rs1 != 0)) ? memory_state.rd_data : (
-    ((execute_state.rs1 == writeback_state.rd) && (execute_state.rs1 != 0)) ? writeback_state.rd_data : x_rs1_data
+    ((execute_state.rs1 == writeback_state.rd) && (execute_state.rs1 != 0)) ? w_rd_data : x_rs1_data
   );
   assign x_bp_rs2_data = ((execute_state.rs2 == memory_state.rd) && (execute_state.rs2 != 0)) ? memory_state.rd_data : (
-    ((execute_state.rs2 == writeback_state.rd) && (execute_state.rs2 != 0)) ? writeback_state.rd_data : x_rs2_data
+    ((execute_state.rs2 == writeback_state.rd) && (execute_state.rs2 != 0)) ? w_rd_data : x_rs2_data
   );
   assign x_rs2_data_4_0 = x_bp_rs2_data[4:0];
 
@@ -1645,7 +1650,7 @@ module DatapathAxilMemory (
   Disasm #(
       .PREFIX("M")
   ) disasm_3memory (
-      .insn  (execute_state.insn),
+      .insn  (memory_state.insn),
       .disasm(m_disasm)
   );
 
@@ -1673,7 +1678,7 @@ module DatapathAxilMemory (
   // - Writeback state has a load insn
   // - Memory state has a save insn
   // - rs2 in memory state is rd in writeback state
-  assign m_bp_rs2_data = ((memory_state.rs2 == writeback_state.rd) && writeback_state.is_load_insn && m_is_save_insn) ? writeback_state.rd_data : memory_state.rs2_data;
+  assign m_bp_rs2_data = ((memory_state.rs2 == writeback_state.rd) && writeback_state.is_load_insn && m_is_save_insn) ? w_rd_data : memory_state.rs2_data;
 
   always_comb begin
     m_r_addr_to_dmem = 0;
@@ -1698,22 +1703,22 @@ module DatapathAxilMemory (
 
         // Choose which byte of the loaded word to take
         // We also need to sign-extend our result manually
-        case (memory_state.addr_to_dmem[1:0])
-          2'b00: begin
-            m_rd_data = {{24{dmem.RDATA[7]}}, dmem.RDATA[7:0]};
-          end
-          2'b01: begin
-            m_rd_data = {{24{dmem.RDATA[15]}}, dmem.RDATA[15:8]};
-          end
-          2'b10: begin
-            m_rd_data = {{24{dmem.RDATA[23]}}, dmem.RDATA[23:16]};
-          end
-          2'b11: begin
-            m_rd_data = {{24{dmem.RDATA[31]}}, dmem.RDATA[31:24]};
-          end
-          default: begin
-          end
-        endcase
+        // case (memory_state.addr_to_dmem[1:0])
+        //   2'b00: begin
+        //     m_rd_data = {{24{dmem.RDATA[7]}}, dmem.RDATA[7:0]};
+        //   end
+        //   2'b01: begin
+        //     m_rd_data = {{24{dmem.RDATA[15]}}, dmem.RDATA[15:8]};
+        //   end
+        //   2'b10: begin
+        //     m_rd_data = {{24{dmem.RDATA[23]}}, dmem.RDATA[23:16]};
+        //   end
+        //   2'b11: begin
+        //     m_rd_data = {{24{dmem.RDATA[31]}}, dmem.RDATA[31:24]};
+        //   end
+        //   default: begin
+        //   end
+        // endcase
       end
 
       InsnLbu: begin
@@ -1721,22 +1726,22 @@ module DatapathAxilMemory (
 
         // Choose which byte of the loaded word to take
         // We also need to ZERO-extend our result manually
-        case (memory_state.addr_to_dmem[1:0])
-          2'b00: begin
-            m_rd_data = {24'b0, dmem.RDATA[7:0]};
-          end
-          2'b01: begin
-            m_rd_data = {24'b0, dmem.RDATA[15:8]};
-          end
-          2'b10: begin
-            m_rd_data = {24'b0, dmem.RDATA[23:16]};
-          end
-          2'b11: begin
-            m_rd_data = {24'b0, dmem.RDATA[31:24]};
-          end
-          default: begin
-          end
-        endcase
+        // case (memory_state.addr_to_dmem[1:0])
+        //   2'b00: begin
+        //     m_rd_data = {24'b0, dmem.RDATA[7:0]};
+        //   end
+        //   2'b01: begin
+        //     m_rd_data = {24'b0, dmem.RDATA[15:8]};
+        //   end
+        //   2'b10: begin
+        //     m_rd_data = {24'b0, dmem.RDATA[23:16]};
+        //   end
+        //   2'b11: begin
+        //     m_rd_data = {24'b0, dmem.RDATA[31:24]};
+        //   end
+        //   default: begin
+        //   end
+        // endcase
       end
 
       InsnLh: begin
@@ -1745,16 +1750,16 @@ module DatapathAxilMemory (
         if (memory_state.addr_to_dmem[0] == 0) begin
           m_r_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
 
-          case (memory_state.addr_to_dmem[1])
-            1'b0: begin
-              m_rd_data = {{16{dmem.RDATA[15]}}, dmem.RDATA[15:0]};
-            end
-            1'b1: begin
-              m_rd_data = {{16{dmem.RDATA[31]}}, dmem.RDATA[31:16]};
-            end
-            default: begin
-            end
-          endcase
+          // case (memory_state.addr_to_dmem[1])
+          //   1'b0: begin
+          //     m_rd_data = {{16{dmem.RDATA[15]}}, dmem.RDATA[15:0]};
+          //   end
+          //   1'b1: begin
+          //     m_rd_data = {{16{dmem.RDATA[31]}}, dmem.RDATA[31:16]};
+          //   end
+          //   default: begin
+          //   end
+          // endcase
         end
       end
 
@@ -1764,16 +1769,16 @@ module DatapathAxilMemory (
         if (memory_state.addr_to_dmem[0] == 0) begin
           m_r_addr_to_dmem = {memory_state.addr_to_dmem[31:2], 2'b0};
 
-          case (memory_state.addr_to_dmem[1])
-            1'b0: begin
-              m_rd_data = {16'b0, dmem.RDATA[15:0]};
-            end
-            1'b1: begin
-              m_rd_data = {16'b0, dmem.RDATA[31:16]};
-            end
-            default: begin
-            end
-          endcase
+          // case (memory_state.addr_to_dmem[1])
+          //   1'b0: begin
+          //     m_rd_data = {16'b0, dmem.RDATA[15:0]};
+          //   end
+          //   1'b1: begin
+          //     m_rd_data = {16'b0, dmem.RDATA[31:16]};
+          //   end
+          //   default: begin
+          //   end
+          // endcase
         end
       end
 
@@ -1781,7 +1786,7 @@ module DatapathAxilMemory (
 
         // Only allow aligned addresses (last two bits must be 0)
         if (memory_state.addr_to_dmem[1:0] == 2'b0) begin
-          m_rd_data = dmem.RDATA;
+          // m_rd_data = dmem.RDATA;
           m_r_addr_to_dmem = memory_state.addr_to_dmem;
         end
       end
@@ -1903,6 +1908,11 @@ module DatapathAxilMemory (
   /* WRITEBACK STAGE */
   /*******************/
 
+  logic w_we;
+  logic [`REG_SIZE] w_rd_data;
+  logic [`REG_SIZE] w_loaded_data;
+  logic w_load_override;
+
   stage_writeback_t writeback_state;
   always_ff @(posedge clk) begin
     if (rst) begin
@@ -1910,9 +1920,11 @@ module DatapathAxilMemory (
           pc: 0,
           insn: 0,
           cycle_status: CYCLE_RESET,
+          insn_name: 0,
 
           rd: 0,
           rd_data: 0,
+          addr_to_dmem: 0,
 
           is_load_insn: 0,
 
@@ -1925,9 +1937,11 @@ module DatapathAxilMemory (
             pc: memory_state.pc,
             insn: memory_state.insn,
             cycle_status: memory_state.cycle_status,
+            insn_name: memory_state.insn_name,
 
             rd: memory_state.rd,
             rd_data: m_rd_data,
+            addr_to_dmem: memory_state.addr_to_dmem,
 
             is_load_insn: memory_state.is_load_insn,
 
@@ -1941,23 +1955,126 @@ module DatapathAxilMemory (
   Disasm #(
       .PREFIX("W")
   ) disasm_4writeback (
-      .insn  (memory_state.insn),
+      .insn  (writeback_state.insn),
       .disasm(w_disasm)
   );
+
+  // Loads from previous state
+  always_comb begin
+    w_load_override = 0;
+    w_loaded_data   = 0;
+
+    case (writeback_state.insn_name)
+      /* LOAD INSNS */
+      InsnLb: begin
+        w_load_override = 1;
+
+        // Choose which byte of the loaded word to take
+        // We also need to sign-extend our result manually
+        case (writeback_state.addr_to_dmem[1:0])
+          2'b00: begin
+            w_loaded_data = {{24{dmem.RDATA[7]}}, dmem.RDATA[7:0]};
+          end
+          2'b01: begin
+            w_loaded_data = {{24{dmem.RDATA[15]}}, dmem.RDATA[15:8]};
+          end
+          2'b10: begin
+            w_loaded_data = {{24{dmem.RDATA[23]}}, dmem.RDATA[23:16]};
+          end
+          2'b11: begin
+            w_loaded_data = {{24{dmem.RDATA[31]}}, dmem.RDATA[31:24]};
+          end
+          default: begin
+          end
+        endcase
+      end
+
+      InsnLbu: begin
+        w_load_override = 1;
+
+        // Choose which byte of the loaded word to take
+        // We also need to ZERO-extend our result manually
+        case (writeback_state.addr_to_dmem[1:0])
+          2'b00: begin
+            w_loaded_data = {24'b0, dmem.RDATA[7:0]};
+          end
+          2'b01: begin
+            w_loaded_data = {24'b0, dmem.RDATA[15:8]};
+          end
+          2'b10: begin
+            w_loaded_data = {24'b0, dmem.RDATA[23:16]};
+          end
+          2'b11: begin
+            w_loaded_data = {24'b0, dmem.RDATA[31:24]};
+          end
+          default: begin
+          end
+        endcase
+      end
+
+      InsnLh: begin
+        w_load_override = 1;
+
+        // Only allow aligned addresses (last bit must be 0)
+        if (writeback_state.addr_to_dmem[0] == 0) begin
+          case (writeback_state.addr_to_dmem[1])
+            1'b0: begin
+              w_loaded_data = {{16{dmem.RDATA[15]}}, dmem.RDATA[15:0]};
+            end
+            1'b1: begin
+              w_loaded_data = {{16{dmem.RDATA[31]}}, dmem.RDATA[31:16]};
+            end
+            default: begin
+            end
+          endcase
+        end
+      end
+
+      InsnLhu: begin
+        w_load_override = 1;
+
+        // Only allow aligned addresses (last bit must be 0)
+        if (writeback_state.addr_to_dmem[0] == 0) begin
+          case (writeback_state.addr_to_dmem[1])
+            1'b0: begin
+              w_loaded_data = {16'b0, dmem.RDATA[15:0]};
+            end
+            1'b1: begin
+              w_loaded_data = {16'b0, dmem.RDATA[31:16]};
+            end
+            default: begin
+            end
+          endcase
+        end
+      end
+
+      InsnLw: begin
+        // Only allow aligned addresses (last two bits must be 0)
+        if (writeback_state.addr_to_dmem[1:0] == 2'b0) begin
+          w_load_override = 1;
+          w_loaded_data   = dmem.RDATA;
+        end
+      end
+
+      default: begin
+      end
+    endcase
+  end
 
   // Traces
   assign trace_writeback_pc = writeback_state.pc;
   assign trace_writeback_insn = writeback_state.insn;
   assign trace_writeback_cycle_status = writeback_state.cycle_status;
 
-  logic w_we;
-  logic [`REG_SIZE] w_rd_data;
-
   // Writing back to register files
   always_comb begin
     if (writeback_state.we == 1) begin
-      w_rd_data = writeback_state.rd_data;
       w_we = writeback_state.we;
+      if (w_load_override) begin
+        w_rd_data = w_loaded_data;
+      end else begin
+        w_rd_data = writeback_state.rd_data;
+      end
     end else begin
       w_rd_data = 0;
       w_we = 0;
