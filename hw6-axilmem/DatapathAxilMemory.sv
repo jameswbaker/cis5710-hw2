@@ -531,42 +531,49 @@ module DatapathAxilMemory (
   /* DECODE STAGE */
   /****************/
 
-  logic [`REG_SIZE] d_insn_curr;
+  logic [`REG_SIZE] d_insn_fetched;
   logic [`REG_SIZE] d_insn_prev;  // for saving the prev insn state
   logic [`REG_SIZE] d_insn;  // the actual insn we will end up using (after stalling)
+  logic d_stalling;
 
   always_comb begin
     if (decode_state.cycle_status == CYCLE_TAKEN_BRANCH) begin
-      d_insn_curr = 0;
+      d_insn_fetched = 0;
     end else begin
-      d_insn_curr = imem.RDATA;
+      d_insn_fetched = imem.RDATA;
     end
   end
 
   // this is the actual d_insn we should use
   always_comb begin
-    if (execute_state.cycle_status == CYCLE_LOAD2USE || execute_state.cycle_status == CYCLE_DIV2USE) begin
+    if (d_stalling) begin
       d_insn = d_insn_prev;
     end else begin
-      d_insn = d_insn_curr;
+      d_insn = d_insn_fetched;
     end
   end
 
   // this shows how to package up state in a `struct packed`, and how to pass it between stages
   stage_decode_t decode_state;
   always_ff @(posedge clk) begin
-    d_insn_prev <= d_insn_curr;
+    // if (execute_state.cycle_status == CYCLE_LOAD2USE || execute_state.cycle_status == CYCLE_DIV2USE) begin
+    if (execute_state.cycle_status == CYCLE_LOAD2USE || execute_state.cycle_status == CYCLE_DIV2USE) begin
+      d_insn_prev <= d_insn_prev;
+    end else begin
+      d_insn_prev <= d_insn;
+    end
 
     if (rst) begin
+      d_stalling   <= 0;
       decode_state <= '{pc: 0, cycle_status: CYCLE_RESET};
     end else if (x_branching) begin
       decode_state <= '{pc: 0, cycle_status: CYCLE_TAKEN_BRANCH};
     end else if (x_load_stall || x_divide_to_use_stall || d_fence_stall) begin
+      d_stalling   <= 1;
       decode_state <= '{pc: decode_state.pc, cycle_status: CYCLE_NO_STALL};
     end else begin
-      begin
-        decode_state <= '{pc: f_pc_current, cycle_status: f_cycle_status};
-      end
+      d_stalling   <= 0;
+      decode_state <= '{pc: f_pc_current, cycle_status: f_cycle_status};
     end
   end
   wire [255:0] d_disasm;
