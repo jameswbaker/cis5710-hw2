@@ -2088,6 +2088,79 @@ module DatapathAxilMemory (
 
 endmodule
 
+module MemorySingleCycle #(
+    parameter int NUM_WORDS = 512
+) (
+    // rst for both imem and dmem
+    input wire rst,
+
+    // clock for both imem and dmem. The memory reads/writes on @(negedge clk)
+    input wire clk,
+
+    // must always be aligned to a 4B boundary
+    input wire [`REG_SIZE] pc_to_imem,
+
+    // the value at memory location pc_to_imem
+    output logic [`REG_SIZE] insn_from_imem,
+
+    // must always be aligned to a 4B boundary
+    input wire [`REG_SIZE] addr_to_dmem,
+
+    // the value at memory location addr_to_dmem
+    output logic [`REG_SIZE] load_data_from_dmem,
+
+    // the value to be written to addr_to_dmem, controlled by store_we_to_dmem
+    input wire [`REG_SIZE] store_data_to_dmem,
+
+    // Each bit determines whether to write the corresponding byte of store_data_to_dmem to memory location addr_to_dmem.
+    // E.g., 4'b1111 will write 4 bytes. 4'b0001 will write only the least-significant byte.
+    input wire [3:0] store_we_to_dmem
+);
+
+  // memory is arranged as an array of 4B words
+  logic [`REG_SIZE] mem[NUM_WORDS];
+
+  initial begin
+    $readmemh("mem_initial_contents.hex", mem, 0);
+  end
+
+  always_comb begin
+    // memory addresses should always be 4B-aligned
+    assert (pc_to_imem[1:0] == 2'b00);
+    assert (addr_to_dmem[1:0] == 2'b00);
+  end
+
+  localparam int AddrMsb = $clog2(NUM_WORDS) + 1;
+  localparam int AddrLsb = 2;
+
+  always @(negedge clk) begin
+    if (rst) begin
+    end else begin
+      insn_from_imem <= mem[{pc_to_imem[AddrMsb:AddrLsb]}];
+    end
+  end
+
+  always @(negedge clk) begin
+    if (rst) begin
+    end else begin
+      if (store_we_to_dmem[0]) begin
+        mem[addr_to_dmem[AddrMsb:AddrLsb]][7:0] <= store_data_to_dmem[7:0];
+      end
+      if (store_we_to_dmem[1]) begin
+        mem[addr_to_dmem[AddrMsb:AddrLsb]][15:8] <= store_data_to_dmem[15:8];
+      end
+      if (store_we_to_dmem[2]) begin
+        mem[addr_to_dmem[AddrMsb:AddrLsb]][23:16] <= store_data_to_dmem[23:16];
+      end
+      if (store_we_to_dmem[3]) begin
+        mem[addr_to_dmem[AddrMsb:AddrLsb]][31:24] <= store_data_to_dmem[31:24];
+      end
+      // dmem is "read-first": read returns value before the write
+      load_data_from_dmem <= mem[{addr_to_dmem[AddrMsb:AddrLsb]}];
+    end
+  end
+endmodule
+
 /* This design has just one clock for both processor and memory. */
 module RiscvProcessor (
     input wire clk,
